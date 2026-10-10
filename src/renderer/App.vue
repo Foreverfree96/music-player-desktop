@@ -397,7 +397,7 @@ const {
   library, queue, currentTrack, currentIndex, isPlaying, progress, duration,
   shuffled, repeatMode, volume, loading, scanStatus,
   playAll, playTrackFromList, togglePlayPause, next, prev,
-  seek, setVolume, toggleShuffle, toggleRepeat, formatTime,
+  seek, setVolume, toggleShuffle, toggleRepeat, formatTime, restoreLastTrack,
   eqBands, eqPreset, eqEnabled, EQ_PRESETS, EQ_FREQUENCIES,
   setEqBand, setEqPreset, toggleEq,
 } = usePlayer()
@@ -734,6 +734,7 @@ onMounted(async () => {
   try {
     await loadPlaylists()
     await loadLibrary()
+    restoreLastTrack()
   } catch (e) {
     console.error('loadLibrary error:', e)
     scanStatus.value = 'Error: ' + e.message

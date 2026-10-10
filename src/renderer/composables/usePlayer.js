@@ -135,6 +135,12 @@ const currentTrack = computed(() => {
 audio.addEventListener('timeupdate', () => {
   progress.value = audio.currentTime
   duration.value = audio.duration || 0
+  // Save playback position every few seconds
+  const track = currentTrack.value
+  if (track && Math.floor(audio.currentTime) % 3 === 0) {
+    localStorage.setItem('mp-last-track', track.path)
+    localStorage.setItem('mp-last-time', String(audio.currentTime))
+  }
 })
 
 audio.addEventListener('ended', () => {
@@ -273,6 +279,23 @@ function toggleRepeat() {
   repeatMode.value = modes[(idx + 1) % 3]
 }
 
+function restoreLastTrack() {
+  const lastPath = localStorage.getItem('mp-last-track')
+  const lastTime = parseFloat(localStorage.getItem('mp-last-time') || '0')
+  if (!lastPath) return
+  const track = library.value.find(s => s.path === lastPath)
+  if (!track) return
+  queue.value = [track]
+  originalQueue.value = [track]
+  currentIndex.value = 0
+  initAudioContext()
+  if (audioContext?.state === 'suspended') audioContext.resume()
+  const url = 'file:///' + track.path.replace(/\\/g, '/')
+  audio.src = url
+  audio.currentTime = lastTime
+  // Don't auto-play, just load it paused
+}
+
 function formatTime(secs) {
   if (!secs || isNaN(secs)) return '0:00'
   const m = Math.floor(secs / 60)
@@ -285,7 +308,7 @@ export function usePlayer() {
     library, queue, currentTrack, currentIndex, isPlaying, progress, duration,
     shuffled, repeatMode, volume, loading, scanStatus,
     playAll, playTrackFromList, play, pause, togglePlayPause,
-    next, prev, seek, setVolume, toggleShuffle, toggleRepeat, formatTime,
+    next, prev, seek, setVolume, toggleShuffle, toggleRepeat, formatTime, restoreLastTrack,
     // EQ
     eqBands, eqPreset, eqEnabled, EQ_PRESETS, EQ_FREQUENCIES,
     setEqBand, setEqPreset, toggleEq,
