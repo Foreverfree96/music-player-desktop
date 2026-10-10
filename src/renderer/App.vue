@@ -381,7 +381,8 @@
       </div>
 
       <div class="np-queue-label" @click="showQueue = !showQueue">
-        Up Next ({{ queue.length - currentIndex - 1 }}) {{ showQueue ? '▲' : '▼' }}
+        <span>Up Next ({{ queue.length - currentIndex - 1 }})</span>
+        <span class="eq-chevron">{{ showQueue ? '▲' : '▼' }}</span>
       </div>
       <div v-if="showQueue" class="np-queue">
         <div
@@ -1217,7 +1218,7 @@ onMounted(async () => {
 .volume-bar::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--pink); cursor: pointer; box-shadow: 0 0 4px rgba(255, 20, 147, 0.4); }
 .vol-pct { font-size: 12px; color: var(--text-muted); min-width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
 
-.np-queue-label { text-align: center; font-size: 12px; color: var(--text-muted); padding: 8px 0 4px; cursor: pointer; flex-shrink: 0; }
+.np-queue-label { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-muted); padding: 8px 4px 4px; cursor: pointer; flex-shrink: 0; }
 .np-queue { flex: 1; overflow-y: auto; min-height: 0; }
 .np-queue::-webkit-scrollbar { width: 4px; }
 .np-queue::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
@@ -1243,9 +1244,13 @@ onMounted(async () => {
 .eq-toggle.active { border-color: var(--pink); background: rgba(255, 20, 147, 0.15); color: var(--pink); }
 
 .np-eq { flex-shrink: 0; padding: 0 4px 6px; }
-.eq-preset-row { margin-bottom: 8px; }
+.eq-preset-row { margin-bottom: 8px; position: relative; }
+.eq-preset-row::after {
+  content: '▼'; position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  font-size: 10px; color: var(--text-muted); pointer-events: none;
+}
 .eq-preset-select {
-  width: 100%; padding: 6px 10px; background: var(--bg-card); border: 1px solid #333;
+  width: 100%; padding: 6px 10px; padding-right: 28px; background: var(--bg-card); border: 1px solid #333;
   border-radius: 8px; color: var(--text); font-size: 13px; outline: none; cursor: pointer;
   -webkit-appearance: none;
 }
