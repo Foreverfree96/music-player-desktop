@@ -279,6 +279,21 @@ function toggleRepeat() {
   repeatMode.value = modes[(idx + 1) % 3]
 }
 
+function playNext(tracks) {
+  if (!tracks.length) return
+  // If nothing is playing, just start playing these tracks
+  if (currentIndex.value < 0 || queue.value.length === 0) {
+    playAll(tracks, 0)
+    return
+  }
+  const insertAt = currentIndex.value + 1
+  // Remove these tracks from upcoming queue positions (after current) to avoid duplicates
+  const trackIds = new Set(tracks.map(t => t.id))
+  const before = queue.value.slice(0, insertAt)
+  const after = queue.value.slice(insertAt).filter(t => !trackIds.has(t.id))
+  queue.value = [...before, ...tracks, ...after]
+}
+
 function restoreLastTrack() {
   const lastPath = localStorage.getItem('mp-last-track')
   const lastTime = parseFloat(localStorage.getItem('mp-last-time') || '0')
@@ -308,7 +323,7 @@ export function usePlayer() {
     library, queue, currentTrack, currentIndex, isPlaying, progress, duration,
     shuffled, repeatMode, volume, loading, scanStatus,
     playAll, playTrackFromList, play, pause, togglePlayPause,
-    next, prev, seek, setVolume, toggleShuffle, toggleRepeat, formatTime, restoreLastTrack,
+    next, prev, seek, setVolume, toggleShuffle, toggleRepeat, formatTime, restoreLastTrack, playNext,
     // EQ
     eqBands, eqPreset, eqEnabled, EQ_PRESETS, EQ_FREQUENCIES,
     setEqBand, setEqPreset, toggleEq,

@@ -242,8 +242,9 @@
 
     <!-- Context Menu -->
     <div v-if="contextMenu" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click.stop>
-      <div class="ctx-item" @click="contextAddToPlaylist()">{{ contextMenu.songIds.length > 1 ? `Add ${contextMenu.songIds.length} songs to Playlist` : 'Add to Playlist' }}</div>
-      <div class="ctx-item ctx-danger" @click="contextRemoveSong()">{{ contextMenu.songIds.length > 1 ? `Remove ${contextMenu.songIds.length} songs from Library` : 'Remove from Library' }}</div>
+      <div class="ctx-item" @click="contextPlayNext()">{{ contextMenu.songIds.length > 1 ? `Play ${contextMenu.songIds.length} Next` : 'Play Next' }}</div>
+      <div class="ctx-item" @click="contextAddToPlaylist()">{{ contextMenu.songIds.length > 1 ? `Add ${contextMenu.songIds.length} to Playlist` : 'Add to Playlist' }}</div>
+      <div class="ctx-item ctx-danger" @click="contextRemoveSong()">{{ contextMenu.songIds.length > 1 ? `Remove ${contextMenu.songIds.length} from Library` : 'Remove from Library' }}</div>
     </div>
     <div v-if="contextMenu" class="context-backdrop" @click="contextMenu = null"></div>
 
@@ -405,7 +406,7 @@ const {
   library, queue, currentTrack, currentIndex, isPlaying, progress, duration,
   shuffled, repeatMode, volume, loading, scanStatus,
   playAll, playTrackFromList, togglePlayPause, next, prev, pause,
-  seek, setVolume, toggleShuffle, toggleRepeat, formatTime, restoreLastTrack,
+  seek, setVolume, toggleShuffle, toggleRepeat, formatTime, restoreLastTrack, playNext,
   eqBands, eqPreset, eqEnabled, EQ_PRESETS, EQ_FREQUENCIES,
   setEqBand, setEqPreset, toggleEq,
 } = usePlayer()
@@ -750,6 +751,15 @@ function openSongMenu(event, song) {
     song,
     songIds: songs,
   }
+}
+
+function contextPlayNext() {
+  if (!contextMenu.value) return
+  const songIds = contextMenu.value.songIds
+  const tracks = songIds.map(id => library.value.find(s => s.id === id)).filter(Boolean)
+  playNext(tracks)
+  contextMenu.value = null
+  clearSelection()
 }
 
 function contextAddToPlaylist() {
