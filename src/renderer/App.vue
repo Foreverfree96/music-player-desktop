@@ -612,20 +612,21 @@ async function loadLibrary() {
     loading.value = false
     return
   }
-  // No cache — scan (saved folders or defaults)
-  await rescanMusic()
+  // No cache — only scan if user has saved folders
+  if (customDirs.value.length > 0) {
+    await rescanMusic()
+  }
 }
 
 async function rescanMusic() {
+  if (customDirs.value.length === 0) return
   loading.value = true
   scanStatus.value = 'Discovering files...'
   try {
     api?.onScanProgress((data) => {
       scanStatus.value = `Reading metadata... ${data.found}/${data.total} files`
     })
-    // Pass saved folders if any, otherwise null lets main process use defaults
-    const dirs = customDirs.value.length > 0 ? customDirs.value : null
-    const songs = await api.scanLibrary(dirs)
+    const songs = await api.scanLibrary(customDirs.value)
     library.value = songs.sort((a, b) => a.title.localeCompare(b.title))
     scanStatus.value = ''
   } catch (e) {
