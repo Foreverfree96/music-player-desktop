@@ -319,6 +319,45 @@
         <span class="vol-pct">{{ Math.round(volume) }}%</span>
       </div>
 
+      <!-- Equalizer -->
+      <div class="np-eq-header" @click="showEq = !showEq">
+        <span>Equalizer</span>
+        <div class="eq-header-right">
+          <button class="eq-toggle" :class="{ active: eqEnabled }" @click.stop="toggleEq()">
+            {{ eqEnabled ? 'ON' : 'OFF' }}
+          </button>
+          <span class="eq-chevron">{{ showEq ? '▲' : '▼' }}</span>
+        </div>
+      </div>
+      <div v-if="showEq" class="np-eq">
+        <div class="eq-preset-row">
+          <select class="eq-preset-select" :value="eqPreset" @change="setEqPreset($event.target.value)">
+            <option v-for="name in eqPresetNames" :key="name" :value="name">{{ name }}</option>
+            <option v-if="eqPreset === 'Custom'" value="Custom">Custom</option>
+          </select>
+        </div>
+        <div class="eq-bands">
+          <div class="eq-db-labels">
+            <span>+12</span>
+            <span>0</span>
+            <span>-12</span>
+          </div>
+          <div v-for="(band, i) in eqBands" :key="band.freq" class="eq-band">
+            <input
+              type="range"
+              class="eq-slider"
+              min="-12"
+              max="12"
+              step="0.5"
+              :value="band.gain"
+              @input="setEqBand(i, Number($event.target.value))"
+              orient="vertical"
+            />
+            <span class="eq-freq-label">{{ formatFreq(band.freq) }}</span>
+          </div>
+        </div>
+      </div>
+
       <div class="np-queue-label" @click="showQueue = !showQueue">
         Up Next ({{ queue.length - currentIndex - 1 }}) {{ showQueue ? '▲' : '▼' }}
       </div>
@@ -346,7 +385,16 @@ const {
   shuffled, repeatMode, volume, loading, scanStatus,
   playAll, playTrackFromList, togglePlayPause, next, prev,
   seek, setVolume, toggleShuffle, toggleRepeat, formatTime,
+  eqBands, eqPreset, eqEnabled, EQ_PRESETS, EQ_FREQUENCIES,
+  setEqBand, setEqPreset, toggleEq,
 } = usePlayer()
+
+const showEq = ref(false)
+const eqPresetNames = Object.keys(EQ_PRESETS)
+
+function formatFreq(f) {
+  return f >= 1000 ? (f / 1000) + 'k' : String(f)
+}
 
 const tabs = [
   { id: 'songs', label: 'Songs' },
@@ -997,6 +1045,59 @@ onMounted(async () => {
 .np-queue-item:hover { background: var(--bg-card); }
 .np-queue-title { font-size: 12px; color: var(--text); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: 8px; }
 .np-queue-artist { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+
+/* Equalizer */
+.np-eq-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 4px; cursor: pointer; flex-shrink: 0;
+  font-size: 13px; color: var(--text-muted);
+  border-top: 1px solid #1a1a1a; margin-top: 4px;
+}
+.eq-header-right { display: flex; align-items: center; gap: 8px; }
+.eq-chevron { font-size: 10px; }
+.eq-toggle {
+  padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.5px; cursor: pointer; border: 1px solid #444;
+  background: #1a1a1a; color: var(--text-muted); transition: all 0.15s;
+}
+.eq-toggle.active { border-color: var(--pink); background: rgba(255, 20, 147, 0.15); color: var(--pink); }
+
+.np-eq { flex-shrink: 0; padding: 0 4px 6px; }
+.eq-preset-row { margin-bottom: 8px; }
+.eq-preset-select {
+  width: 100%; padding: 6px 10px; background: var(--bg-card); border: 1px solid #333;
+  border-radius: 8px; color: var(--text); font-size: 13px; outline: none; cursor: pointer;
+  -webkit-appearance: none;
+}
+.eq-preset-select:focus { border-color: var(--pink); }
+.eq-preset-select option { background: #1a1a1a; color: var(--text); }
+
+.eq-bands {
+  display: flex; align-items: flex-start; gap: 2px;
+  padding: 4px 0;
+}
+.eq-db-labels {
+  display: flex; flex-direction: column; justify-content: space-between;
+  height: 100px; font-size: 9px; color: #555; padding: 2px 4px 18px 0;
+  flex-shrink: 0; min-width: 20px; text-align: right;
+}
+.eq-band {
+  display: flex; flex-direction: column; align-items: center; flex: 1;
+}
+.eq-freq-label { font-size: 9px; color: #555; margin-top: 4px; }
+
+.eq-slider {
+  -webkit-appearance: slider-vertical; width: 16px; height: 100px;
+  background: transparent; outline: none; cursor: pointer;
+}
+.eq-slider::-webkit-slider-runnable-track {
+  width: 4px; background: #333; border-radius: 2px;
+}
+.eq-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--pink); cursor: pointer;
+  box-shadow: 0 0 4px rgba(255, 20, 147, 0.4);
+}
 
 /* Rescan button */
 .header-icon-btn {

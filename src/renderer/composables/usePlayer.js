@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 
 const audio = new Audio()
+audio.crossOrigin = 'anonymous'
 const library = ref([])
 const queue = ref([])
 const originalQueue = ref([])
@@ -10,13 +11,121 @@ const progress = ref(0)
 const duration = ref(0)
 const shuffled = ref(false)
 const repeatMode = ref('off')
-// Load saved volume (stored as linear 0-100)
 const savedVol = parseInt(localStorage.getItem('mp-volume') ?? '80')
 const volume = ref(Math.max(0, Math.min(100, savedVol)))
-// Apply saved volume immediately using logarithmic curve
 audio.volume = Math.pow(volume.value / 100, 2)
 const loading = ref(false)
 const scanStatus = ref('')
+
+// ─── Web Audio API — Equalizer ───
+
+const EQ_FREQUENCIES = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
+
+const EQ_PRESETS = {
+  'Flat':         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  'Bass Boost':   [6, 5, 4, 2, 0, 0, 0, 0, 0, 0],
+  'Treble Boost': [0, 0, 0, 0, 0, 1, 2, 4, 5, 6],
+  'Rock':         [5, 4, 2, 0, -1, 0, 2, 3, 4, 4],
+  'Pop':          [-1, 1, 3, 4, 3, 0, -1, -1, 1, 2],
+  'Jazz':         [3, 2, 0, 1, -1, -1, 0, 1, 3, 4],
+  'Classical':    [4, 3, 2, 1, -1, -1, 0, 2, 3, 4],
+  'Electronic':   [5, 4, 2, 0, -2, 0, 1, 3, 4, 5],
+  'Vocal':        [-2, -1, 0, 2, 4, 4, 3, 1, 0, -1],
+  'Bass Cut':     [-6, -4, -2, 0, 0, 0, 0, 0, 0, 0],
+}
+
+// Load saved EQ state
+const savedBands = JSON.parse(localStorage.getItem('mp-eq-bands') || 'null')
+const savedPreset = localStorage.getItem('mp-eq-preset') || 'Flat'
+const savedEnabled = localStorage.getItem('mp-eq-enabled') !== 'false'
+
+const eqBands = ref(
+  savedBands || EQ_FREQUENCIES.map((freq, i) => ({
+    freq,
+    gain: (EQ_PRESETS[savedPreset] || EQ_PRESETS.Flat)[i]
+  }))
+)
+const eqPreset = ref(savedPreset)
+const eqEnabled = ref(savedEnabled)
+
+// Web Audio nodes (initialized lazily on first play)
+let audioContext = null
+let sourceNode = null
+let gainNode = null
+let filterNodes = []
+let audioContextInitialized = false
+
+function initAudioContext() {
+  if (audioContextInitialized) return
+  audioContextInitialized = true
+
+  audioContext = new (window.AudioContext || window.webkitAudioContext)()
+  sourceNode = audioContext.createMediaElementSource(audio)
+  gainNode = audioContext.createGain()
+
+  // Set initial volume on gain node
+  gainNode.gain.value = Math.pow(volume.value / 100, 2)
+
+  // Create 10 biquad filters
+  filterNodes = EQ_FREQUENCIES.map((freq, i) => {
+    const filter = audioContext.createBiquadFilter()
+    filter.type = i === 0 ? 'lowshelf' : i === 9 ? 'highshelf' : 'peaking'
+    filter.frequency.value = freq
+    if (filter.type === 'peaking') filter.Q.value = 1.4
+    filter.gain.value = eqEnabled.value ? eqBands.value[i].gain : 0
+    return filter
+  })
+
+  // Connect chain: source → filters → gain → destination
+  let prev = sourceNode
+  for (const filter of filterNodes) {
+    prev.connect(filter)
+    prev = filter
+  }
+  prev.connect(gainNode)
+  gainNode.connect(audioContext.destination)
+
+  // Since we're now using gainNode for volume, set audio.volume to 1
+  audio.volume = 1
+}
+
+function saveEqState() {
+  localStorage.setItem('mp-eq-bands', JSON.stringify(eqBands.value))
+  localStorage.setItem('mp-eq-preset', eqPreset.value)
+  localStorage.setItem('mp-eq-enabled', String(eqEnabled.value))
+}
+
+function setEqBand(index, gain) {
+  eqBands.value[index].gain = gain
+  if (filterNodes[index] && eqEnabled.value) {
+    filterNodes[index].gain.value = gain
+  }
+  eqPreset.value = 'Custom'
+  saveEqState()
+}
+
+function setEqPreset(name) {
+  const gains = EQ_PRESETS[name]
+  if (!gains) return
+  eqPreset.value = name
+  for (let i = 0; i < 10; i++) {
+    eqBands.value[i].gain = gains[i]
+    if (filterNodes[i]) {
+      filterNodes[i].gain.value = eqEnabled.value ? gains[i] : 0
+    }
+  }
+  saveEqState()
+}
+
+function toggleEq() {
+  eqEnabled.value = !eqEnabled.value
+  for (let i = 0; i < filterNodes.length; i++) {
+    filterNodes[i].gain.value = eqEnabled.value ? eqBands.value[i].gain : 0
+  }
+  saveEqState()
+}
+
+// ─── Core player ───
 
 const currentTrack = computed(() => {
   if (currentIndex.value < 0 || currentIndex.value >= queue.value.length) return null
@@ -48,7 +157,11 @@ audio.addEventListener('pause', () => { isPlaying.value = false })
 function playCurrentTrack() {
   const track = currentTrack.value
   if (!track) return
-  // Use file:// protocol for local files on desktop
+
+  // Initialize Web Audio chain on first play
+  initAudioContext()
+  if (audioContext?.state === 'suspended') audioContext.resume()
+
   const url = 'file:///' + track.path.replace(/\\/g, '/')
   audio.src = url
   audio.play().catch(e => console.error('Play error:', e))
@@ -70,6 +183,7 @@ function playTrackFromList(tracks, track) {
 }
 
 function play() {
+  if (audioContext?.state === 'suspended') audioContext.resume()
   if (audio.src) audio.play().catch(() => {})
 }
 
@@ -113,8 +227,12 @@ function seek(time) {
 
 function setVolume(v) {
   volume.value = v
-  // Logarithmic curve: squaring gives much better perceived volume control
-  audio.volume = Math.pow(v / 100, 2)
+  const scaled = Math.pow(v / 100, 2)
+  if (gainNode) {
+    gainNode.gain.value = scaled
+  } else {
+    audio.volume = scaled
+  }
   localStorage.setItem('mp-volume', String(Math.round(v)))
 }
 
@@ -168,5 +286,8 @@ export function usePlayer() {
     shuffled, repeatMode, volume, loading, scanStatus,
     playAll, playTrackFromList, play, pause, togglePlayPause,
     next, prev, seek, setVolume, toggleShuffle, toggleRepeat, formatTime,
+    // EQ
+    eqBands, eqPreset, eqEnabled, EQ_PRESETS, EQ_FREQUENCIES,
+    setEqBand, setEqPreset, toggleEq,
   }
 }
