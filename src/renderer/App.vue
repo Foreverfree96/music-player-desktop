@@ -60,7 +60,8 @@
     </div>
 
     <!-- Content Area -->
-    <div class="content-area">
+    <div class="content-wrapper">
+    <div class="content-area" :class="{ 'has-alpha': showAlphaScroller }" ref="contentArea">
       <div v-if="loading" class="loading">
         <div>Scanning for music...</div>
         <div v-if="scanStatus" class="scan-status">{{ scanStatus }}</div>
@@ -84,6 +85,7 @@
           :key="song.id"
           class="song-item"
           :class="{ active: currentTrack && currentTrack.id === song.id, selected: selectedSongs.has(song.id) }"
+          :data-letter="song.title.charAt(0).toUpperCase()"
           @click="handleSongClick($event, song, detailView.songs)"
           @contextmenu.prevent="openSongMenu($event, song)"
         >
@@ -110,6 +112,7 @@
           :key="song.id"
           class="song-item"
           :class="{ active: currentTrack && currentTrack.id === song.id, selected: selectedSongs.has(song.id) }"
+          :data-letter="song.title.charAt(0).toUpperCase()"
           @click="handleSongClick($event, song, filteredSongs)"
           @contextmenu.prevent="openSongMenu($event, song)"
         >
@@ -202,6 +205,27 @@
         </div>
       </template>
     </div>
+
+    <!-- Alphabet Scroller -->
+    <div
+      v-if="showAlphaScroller"
+      class="alpha-scroller"
+      @mousedown.prevent="startAlphaScroll"
+      @touchstart.prevent="startAlphaScroll"
+    >
+      <div
+        v-for="letter in alphabetLetters"
+        :key="letter"
+        class="alpha-letter"
+        :class="{ active: activeLetter === letter }"
+        :data-letter="letter"
+      >{{ letter }}</div>
+    </div>
+
+    <!-- Letter Scope Bubble -->
+    <div v-if="scopeLetter" class="scope-bubble">{{ scopeLetter }}</div>
+
+    </div><!-- /content-wrapper -->
 
     <!-- Create Playlist Modal -->
     <div v-if="showCreatePlaylist" class="modal-overlay" @click.self="showCreatePlaylist = false">
@@ -449,6 +473,65 @@ const playlistInput = ref(null)
 // Selection
 const selectedSongs = ref(new Set())
 const lastClickedId = ref(null)
+
+// Alphabet scroller
+const contentArea = ref(null)
+const alphabetLetters = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
+const scopeLetter = ref(null)
+const activeLetter = ref(null)
+let alphaScrolling = false
+
+const showAlphaScroller = computed(() => {
+  return (activeTab.value === 'songs' && !detailView.value && filteredSongs.value.length > 20) ||
+    (detailView.value && detailView.value.songs.length > 20)
+})
+
+function scrollToLetter(letter) {
+  if (!contentArea.value) return
+  const selector = letter === '#'
+    ? '.song-item[data-letter]:not([data-letter="A"]):not([data-letter="B"]):not([data-letter="C"]):not([data-letter="D"]):not([data-letter="E"]):not([data-letter="F"]):not([data-letter="G"]):not([data-letter="H"]):not([data-letter="I"]):not([data-letter="J"]):not([data-letter="K"]):not([data-letter="L"]):not([data-letter="M"]):not([data-letter="N"]):not([data-letter="O"]):not([data-letter="P"]):not([data-letter="Q"]):not([data-letter="R"]):not([data-letter="S"]):not([data-letter="T"]):not([data-letter="U"]):not([data-letter="V"]):not([data-letter="W"]):not([data-letter="X"]):not([data-letter="Y"]):not([data-letter="Z"])'
+    : `.song-item[data-letter="${letter}"]`
+  const el = contentArea.value.querySelector(selector)
+  if (el) {
+    el.scrollIntoView({ block: 'start', behavior: 'auto' })
+  }
+}
+
+function getLetterFromEvent(e) {
+  const touch = e.touches ? e.touches[0] : e
+  const el = document.elementFromPoint(touch.clientX, touch.clientY)
+  return el?.dataset?.letter || null
+}
+
+function startAlphaScroll(e) {
+  alphaScrolling = true
+  handleAlphaMove(e)
+  document.addEventListener('mousemove', handleAlphaMove)
+  document.addEventListener('mouseup', stopAlphaScroll)
+  document.addEventListener('touchmove', handleAlphaMove, { passive: false })
+  document.addEventListener('touchend', stopAlphaScroll)
+}
+
+function handleAlphaMove(e) {
+  if (!alphaScrolling) return
+  if (e.cancelable) e.preventDefault()
+  const letter = getLetterFromEvent(e)
+  if (letter && letter !== activeLetter.value) {
+    activeLetter.value = letter
+    scopeLetter.value = letter
+    scrollToLetter(letter)
+  }
+}
+
+function stopAlphaScroll() {
+  alphaScrolling = false
+  activeLetter.value = null
+  setTimeout(() => { scopeLetter.value = null }, 400)
+  document.removeEventListener('mousemove', handleAlphaMove)
+  document.removeEventListener('mouseup', stopAlphaScroll)
+  document.removeEventListener('touchmove', handleAlphaMove)
+  document.removeEventListener('touchend', stopAlphaScroll)
+}
 
 // Context menu
 const contextMenu = ref(null) // { x, y, song }
@@ -1087,14 +1170,77 @@ onMounted(async () => {
 }
 
 /* Content */
+.content-wrapper {
+  flex: 1;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+}
 .content-area {
   flex: 1;
   overflow-y: auto;
   padding: 0 10px;
   padding-bottom: 70px;
 }
+.content-area.has-alpha { padding-right: 22px; }
 .content-area::-webkit-scrollbar { width: 5px; }
 .content-area::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+/* Alphabet Scroller */
+.alpha-scroller {
+  position: absolute;
+  right: 2px;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  z-index: 10;
+  user-select: none;
+  padding: 4px 0;
+}
+.alpha-letter {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  max-height: 20px;
+  transition: color 0.1s;
+}
+.alpha-letter:hover, .alpha-letter.active {
+  color: var(--pink);
+}
+
+/* Scope Bubble */
+.scope-bubble {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  background: rgba(255, 20, 147, 0.85);
+  color: #fff;
+  font-size: 36px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  pointer-events: none;
+  animation: scopeIn 0.1s ease-out;
+}
+@keyframes scopeIn {
+  from { transform: translate(-50%, -50%) scale(0.6); opacity: 0; }
+  to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
 .loading, .empty {
   text-align: center;
   color: var(--text-muted);
