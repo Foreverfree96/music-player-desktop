@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onScanProgress: (cb) => ipcRenderer.on('scan-progress', (_, data) => cb(data)),
   loadPlaylists: () => ipcRenderer.invoke('load-playlists'),
   savePlaylists: (playlists) => ipcRenderer.invoke('save-playlists', playlists),
+  loadSettings: () => ipcRenderer.invoke('load-settings'),
+  saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   windowMinimize: () => ipcRenderer.send('window-minimize'),
   windowMaximize: () => ipcRenderer.send('window-maximize'),
   windowClose: () => ipcRenderer.send('window-close'),

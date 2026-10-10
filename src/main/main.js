@@ -310,3 +310,14 @@ ipcMain.handle('save-playlists', (event, playlists) => {
   writeJSON(playlistsFile, playlists)
   return true
 })
+
+// ─── Settings (saved folders) ───
+
+ipcMain.handle('load-settings', () => {
+  return readJSON(settingsFile, {})
+})
+
+ipcMain.handle('save-settings', (event, settings) => {
+  writeJSON(settingsFile, settings)
+  return true
+})

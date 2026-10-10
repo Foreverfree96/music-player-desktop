@@ -37,6 +37,17 @@
       >{{ tab.label }}</button>
     </div>
 
+    <!-- Saved Folders -->
+    <div v-if="!detailView && customDirs.length > 0" class="saved-folders">
+      <div class="saved-folders-label">Folders:</div>
+      <div class="saved-folder-chips">
+        <div v-for="dir in customDirs" :key="dir" class="folder-chip">
+          <span class="folder-chip-name" :title="dir">{{ folderName(dir) }}</span>
+          <button class="folder-chip-remove" @click="removeFolder(dir)" title="Remove folder">×</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Search -->
     <div class="search-bar">
       <input
@@ -396,6 +407,11 @@ function formatFreq(f) {
   return f >= 1000 ? (f / 1000) + 'k' : String(f)
 }
 
+function folderName(dir) {
+  const parts = dir.replace(/\\/g, '/').split('/')
+  return parts[parts.length - 1] || parts[parts.length - 2] || dir
+}
+
 const tabs = [
   { id: 'songs', label: 'Songs' },
   { id: 'albums', label: 'Albums' },
@@ -558,17 +574,37 @@ function closeWin() { api?.windowClose() }
 
 // ─── Library loading ───
 
+async function saveSettings() {
+  if (api) await api.saveSettings({ folders: customDirs.value })
+}
+
 async function addFolder() {
   if (!api) return
   const folder = await api.pickFolder()
-  if (folder) {
+  if (folder && !customDirs.value.includes(folder)) {
     customDirs.value.push(folder)
+    await saveSettings()
     await rescanMusic()
+  }
+}
+
+async function removeFolder(folder) {
+  customDirs.value = customDirs.value.filter(d => d !== folder)
+  await saveSettings()
+  if (customDirs.value.length > 0) {
+    await rescanMusic()
+  } else {
+    library.value = []
   }
 }
 
 async function loadLibrary() {
   if (!api) return
+  // Load saved folders
+  const settings = await api.loadSettings() || {}
+  if (settings.folders && settings.folders.length) {
+    customDirs.value = settings.folders
+  }
   // Try cache first
   const cached = await api.loadCachedLibrary()
   if (cached && cached.length > 0) {
@@ -576,18 +612,21 @@ async function loadLibrary() {
     loading.value = false
     return
   }
-  // No cache — full scan
-  await rescanMusic()
+  // No cache — scan only saved folders (skip if none)
+  if (customDirs.value.length > 0) {
+    await rescanMusic()
+  }
 }
 
 async function rescanMusic() {
+  if (customDirs.value.length === 0) return
   loading.value = true
   scanStatus.value = 'Discovering files...'
   try {
     api?.onScanProgress((data) => {
       scanStatus.value = `Reading metadata... ${data.found}/${data.total} files`
     })
-    const songs = await api.scanLibrary(customDirs.value.length ? customDirs.value : null)
+    const songs = await api.scanLibrary(customDirs.value)
     library.value = songs.sort((a, b) => a.title.localeCompare(b.title))
     scanStatus.value = ''
   } catch (e) {
@@ -1098,6 +1137,30 @@ onMounted(async () => {
   background: var(--pink); cursor: pointer;
   box-shadow: 0 0 4px rgba(255, 20, 147, 0.4);
 }
+
+/* Saved Folders */
+.saved-folders {
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px 16px 4px; flex-shrink: 0; overflow-x: auto;
+}
+.saved-folders::-webkit-scrollbar { height: 0; }
+.saved-folders-label { font-size: 11px; color: #555; flex-shrink: 0; }
+.saved-folder-chips { display: flex; gap: 4px; flex-wrap: nowrap; overflow-x: auto; }
+.saved-folder-chips::-webkit-scrollbar { height: 0; }
+.folder-chip {
+  display: flex; align-items: center; gap: 3px;
+  padding: 2px 6px 2px 8px; background: var(--bg-card); border: 1px solid #2a2a2a;
+  border-radius: 12px; flex-shrink: 0;
+}
+.folder-chip-name {
+  font-size: 11px; color: var(--text-muted); max-width: 100px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.folder-chip-remove {
+  background: none; border: none; color: #555; font-size: 13px;
+  cursor: pointer; padding: 0 1px; line-height: 1;
+}
+.folder-chip-remove:hover { color: #e55; }
 
 /* Rescan button */
 .header-icon-btn {
