@@ -19,7 +19,8 @@
       <template v-else>
         <h1>My Music</h1>
         <div class="header-right">
-          <span class="song-count">{{ library.length }} songs</span>
+          <span class="song-count">{{ visibleLibrary.length }} songs</span>
+          <button class="header-icon-btn" @click="rescanMusic()" title="Rescan library">↻</button>
           <button class="folder-btn" @click="addFolder()" title="Add music folder">+</button>
         </div>
       </template>
@@ -69,6 +70,7 @@
           class="song-item"
           :class="{ active: currentTrack && currentTrack.id === song.id }"
           @click="playFromDetail(song)"
+          @contextmenu.prevent="openSongMenu($event, song)"
         >
           <div class="song-info">
             <div class="song-title">{{ song.title }}</div>
@@ -89,6 +91,7 @@
           class="song-item"
           :class="{ active: currentTrack && currentTrack.id === song.id }"
           @click="playSong(song)"
+          @contextmenu.prevent="openSongMenu($event, song)"
         >
           <div class="song-info">
             <div class="song-title">{{ song.title }}</div>
@@ -157,7 +160,71 @@
           <div class="group-arrow">›</div>
         </div>
       </template>
+
+      <!-- Playlists Tab -->
+      <template v-else-if="activeTab === 'playlists'">
+        <button class="create-playlist-btn" @click="showCreatePlaylist = true">+ Create Playlist</button>
+        <div v-if="playlists.length === 0" class="empty">No playlists yet</div>
+        <div
+          v-for="pl in playlists"
+          :key="pl.id"
+          class="group-item"
+          @click="openPlaylist(pl)"
+        >
+          <div class="group-icon playlist-icon">♪</div>
+          <div class="group-info">
+            <div class="group-name">{{ pl.name }}</div>
+            <div class="group-meta">{{ pl.songIds.length }} songs</div>
+          </div>
+          <button class="del-playlist-btn" @click.stop="deletePlaylist(pl.id)" title="Delete playlist">×</button>
+          <div class="group-arrow">›</div>
+        </div>
+      </template>
     </div>
+
+    <!-- Create Playlist Modal -->
+    <div v-if="showCreatePlaylist" class="modal-overlay" @click.self="showCreatePlaylist = false">
+      <div class="modal">
+        <div class="modal-title">Create Playlist</div>
+        <input
+          v-model="newPlaylistName"
+          class="modal-input"
+          placeholder="Playlist name..."
+          @keyup.enter="createPlaylist()"
+          ref="playlistInput"
+        />
+        <div class="modal-actions">
+          <button class="modal-btn modal-btn-cancel" @click="showCreatePlaylist = false">Cancel</button>
+          <button class="modal-btn modal-btn-ok" @click="createPlaylist()" :disabled="!newPlaylistName.trim()">Create</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add to Playlist Modal -->
+    <div v-if="showAddToPlaylist" class="modal-overlay" @click.self="showAddToPlaylist = null">
+      <div class="modal">
+        <div class="modal-title">Add to Playlist</div>
+        <div v-if="playlists.length === 0" class="modal-empty">No playlists — create one first</div>
+        <div
+          v-for="pl in playlists"
+          :key="pl.id"
+          class="modal-playlist-item"
+          @click="addToPlaylist(pl.id)"
+        >
+          {{ pl.name }} ({{ pl.songIds.length }})
+        </div>
+        <div class="modal-actions">
+          <button class="modal-btn modal-btn-cancel" @click="showAddToPlaylist = null">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div v-if="contextMenu" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click.stop>
+      <div class="ctx-item" @click="contextAddToPlaylist()">Add to Playlist</div>
+      <div class="ctx-item ctx-danger" @click="contextRemoveSong()">Remove from Library</div>
+    </div>
+    <div v-if="contextMenu" class="context-backdrop" @click="contextMenu = null"></div>
 
     <!-- Mini Player -->
     <div v-if="currentTrack" class="mini-player" @click="showNowPlaying = true">
@@ -173,6 +240,18 @@
             {{ isPlaying ? '⏸' : '▶' }}
           </button>
           <button class="ctrl-btn" @click.stop="next()">⏭</button>
+        </div>
+        <div class="mini-volume" @click.stop>
+          <span class="mini-vol-icon" @click.stop="setVolume(volume > 0 ? 0 : 80)">{{ volume == 0 ? '🔇' : volume < 40 ? '🔉' : '🔊' }}</span>
+          <input
+            type="range"
+            class="mini-vol-bar"
+            min="0"
+            max="100"
+            step="1"
+            :value="volume"
+            @input.stop="setVolume(Number($event.target.value))"
+          />
         </div>
       </div>
     </div>
@@ -211,28 +290,33 @@
       </div>
 
       <div class="np-controls">
-        <button class="np-btn" :class="{ active: shuffled }" @click="toggleShuffle()">⇄</button>
+        <button class="np-mode-btn" :class="{ active: shuffled }" @click="toggleShuffle()">
+          <span class="mode-icon">⇄</span>
+          <span class="mode-label">{{ shuffled ? 'ON' : 'OFF' }}</span>
+        </button>
         <button class="np-btn" @click="prev()">⏮</button>
         <button class="np-btn np-play" @click="togglePlayPause()">
           {{ isPlaying ? '⏸' : '▶' }}
         </button>
         <button class="np-btn" @click="next()">⏭</button>
-        <button class="np-btn" :class="{ active: repeatMode !== 'off' }" @click="toggleRepeat()">
-          {{ repeatMode === 'one' ? '🔂' : '🔁' }}
+        <button class="np-mode-btn" :class="{ active: repeatMode !== 'off' }" @click="toggleRepeat()">
+          <span class="mode-icon">{{ repeatMode === 'one' ? '🔂' : '🔁' }}</span>
+          <span class="mode-label">{{ repeatMode === 'off' ? 'OFF' : repeatMode === 'one' ? 'ONE' : 'ALL' }}</span>
         </button>
       </div>
 
       <div class="np-volume">
-        <span class="vol-icon">🔊</span>
+        <span class="vol-icon" @click="setVolume(volume > 0 ? 0 : 80)">{{ volume == 0 ? '🔇' : volume < 40 ? '🔉' : '🔊' }}</span>
         <input
           type="range"
           class="volume-bar"
           min="0"
-          max="1"
-          step="0.01"
+          max="100"
+          step="1"
           :value="volume"
           @input="setVolume(Number($event.target.value))"
         />
+        <span class="vol-pct">{{ Math.round(volume) }}%</span>
       </div>
 
       <div class="np-queue-label" @click="showQueue = !showQueue">
@@ -254,7 +338,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { usePlayer } from './composables/usePlayer.js'
 
 const {
@@ -269,6 +353,7 @@ const tabs = [
   { id: 'albums', label: 'Albums' },
   { id: 'artists', label: 'Artists' },
   { id: 'genres', label: 'Genres' },
+  { id: 'playlists', label: 'Playlists' },
 ]
 const activeTab = ref('songs')
 const search = ref('')
@@ -277,19 +362,36 @@ const showQueue = ref(false)
 const detailView = ref(null)
 const customDirs = ref([])
 
+// Playlists
+const playlists = ref([])
+const showCreatePlaylist = ref(false)
+const newPlaylistName = ref('')
+const showAddToPlaylist = ref(null) // song object or null
+const playlistInput = ref(null)
+
+// Context menu
+const contextMenu = ref(null) // { x, y, song }
+
+// Removed songs (persisted via localStorage)
+const removedPaths = ref(new Set(JSON.parse(localStorage.getItem('mp-removed') || '[]')))
+
 const api = window.electronAPI
 
 const searchPlaceholder = computed(() => {
   if (detailView.value) return 'Search in ' + detailView.value.name + '...'
-  const labels = { songs: 'songs', albums: 'albums', artists: 'artists', genres: 'genres' }
+  const labels = { songs: 'songs', albums: 'albums', artists: 'artists', genres: 'genres', playlists: 'playlists' }
   return 'Search ' + (labels[activeTab.value] || 'songs') + '...'
 })
 
-// Songs
+// Songs (filtered by removed paths)
+const visibleLibrary = computed(() => {
+  return library.value.filter(s => !removedPaths.value.has(s.path))
+})
+
 const filteredSongs = computed(() => {
-  if (!search.value) return library.value
+  if (!search.value) return visibleLibrary.value
   const q = search.value.toLowerCase()
-  return library.value.filter(s =>
+  return visibleLibrary.value.filter(s =>
     s.title.toLowerCase().includes(q) ||
     s.artist.toLowerCase().includes(q) ||
     s.album.toLowerCase().includes(q) ||
@@ -300,12 +402,11 @@ const filteredSongs = computed(() => {
 // Albums
 const albums = computed(() => {
   const map = {}
-  for (const s of library.value) {
+  for (const s of visibleLibrary.value) {
     const key = s.album + '|||' + s.artist
     if (!map[key]) map[key] = { name: s.album, artist: s.artist, songs: [] }
     map[key].songs.push(s)
   }
-  // Merge albums with same name but diff artist into "Various Artists"
   const byName = {}
   for (const a of Object.values(map)) {
     if (!byName[a.name]) byName[a.name] = { name: a.name, artist: a.artist, songs: [] }
@@ -324,7 +425,7 @@ const filteredAlbums = computed(() => {
 // Artists
 const artists = computed(() => {
   const map = {}
-  for (const s of library.value) {
+  for (const s of visibleLibrary.value) {
     if (!map[s.artist]) map[s.artist] = { name: s.artist, songs: [], albumSet: new Set() }
     map[s.artist].songs.push(s)
     map[s.artist].albumSet.add(s.album)
@@ -343,7 +444,7 @@ const filteredArtists = computed(() => {
 // Genres
 const genres = computed(() => {
   const map = {}
-  for (const s of library.value) {
+  for (const s of visibleLibrary.value) {
     const key = s.genre
     if (!map[key]) map[key] = { name: key, songs: [], artistSet: new Set() }
     map[key].songs.push(s)
@@ -407,16 +508,31 @@ function minimize() { api?.windowMinimize() }
 function maximize() { api?.windowMaximize() }
 function closeWin() { api?.windowClose() }
 
+// ─── Library loading ───
+
 async function addFolder() {
   if (!api) return
   const folder = await api.pickFolder()
   if (folder) {
     customDirs.value.push(folder)
-    await scanMusic()
+    await rescanMusic()
   }
 }
 
-async function scanMusic() {
+async function loadLibrary() {
+  if (!api) return
+  // Try cache first
+  const cached = await api.loadCachedLibrary()
+  if (cached && cached.length > 0) {
+    library.value = cached.sort((a, b) => a.title.localeCompare(b.title))
+    loading.value = false
+    return
+  }
+  // No cache — full scan
+  await rescanMusic()
+}
+
+async function rescanMusic() {
   loading.value = true
   scanStatus.value = 'Discovering files...'
   try {
@@ -434,9 +550,84 @@ async function scanMusic() {
   }
 }
 
-onMounted(() => {
+// ─── Playlists ───
+
+async function loadPlaylists() {
+  if (!api) return
+  playlists.value = await api.loadPlaylists() || []
+}
+
+async function savePlaylists() {
+  if (api) await api.savePlaylists(playlists.value)
+}
+
+async function createPlaylist() {
+  const name = newPlaylistName.value.trim()
+  if (!name) return
+  playlists.value.push({ id: Date.now().toString(), name, songIds: [] })
+  await savePlaylists()
+  newPlaylistName.value = ''
+  showCreatePlaylist.value = false
+}
+
+async function deletePlaylist(id) {
+  playlists.value = playlists.value.filter(p => p.id !== id)
+  await savePlaylists()
+}
+
+function openPlaylist(pl) {
+  const songMap = new Map(library.value.map(s => [s.id, s]))
+  const songs = pl.songIds.map(id => songMap.get(id)).filter(Boolean).filter(s => !removedPaths.value.has(s.path))
+  openDetail('playlist', pl.name, songs)
+}
+
+function openSongMenu(event, song) {
+  contextMenu.value = { x: Math.min(event.clientX, window.innerWidth - 180), y: Math.min(event.clientY, window.innerHeight - 80), song }
+}
+
+function contextAddToPlaylist() {
+  if (!contextMenu.value) return
+  showAddToPlaylist.value = contextMenu.value.song
+  contextMenu.value = null
+}
+
+async function addToPlaylist(playlistId) {
+  const song = showAddToPlaylist.value
+  if (!song) return
+  const pl = playlists.value.find(p => p.id === playlistId)
+  if (pl && !pl.songIds.includes(song.id)) {
+    pl.songIds.push(song.id)
+    await savePlaylists()
+  }
+  showAddToPlaylist.value = null
+}
+
+async function contextRemoveSong() {
+  if (!contextMenu.value) return
+  const song = contextMenu.value.song
+  removedPaths.value.add(song.path)
+  localStorage.setItem('mp-removed', JSON.stringify([...removedPaths.value]))
+  // Also remove from any playlist
+  for (const pl of playlists.value) {
+    pl.songIds = pl.songIds.filter(id => id !== song.id)
+  }
+  await savePlaylists()
+  // Update detail view if open
+  if (detailView.value) {
+    detailView.value.songs = detailView.value.songs.filter(s => s.id !== song.id)
+  }
+  contextMenu.value = null
+}
+
+// Auto-focus playlist name input when modal opens
+watch(showCreatePlaylist, (val) => {
+  if (val) nextTick(() => playlistInput.value?.focus())
+})
+
+onMounted(async () => {
   if (api) {
-    scanMusic()
+    await loadPlaylists()
+    await loadLibrary()
   }
 })
 </script>
@@ -772,20 +963,31 @@ onMounted(() => {
 .seek-bar::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--pink); cursor: pointer; }
 .np-times { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-top: 4px; }
 
-.np-controls { display: flex; align-items: center; justify-content: center; gap: 20px; padding: 8px 0; flex-shrink: 0; }
+.np-controls { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 8px 0; flex-shrink: 0; }
 .np-btn { background: none; border: none; color: var(--text); font-size: 22px; cursor: pointer; padding: 6px; opacity: 0.8; }
 .np-btn:hover { opacity: 1; }
 .np-btn.active { color: var(--pink); opacity: 1; }
+.np-mode-btn {
+  background: #1a1a1a; border: 1.5px solid #333; border-radius: 8px;
+  color: var(--text-muted); cursor: pointer; padding: 4px 8px;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  min-width: 44px; transition: all 0.15s;
+}
+.np-mode-btn:hover { border-color: #555; }
+.np-mode-btn.active { border-color: var(--pink); background: rgba(255, 20, 147, 0.12); color: var(--pink); }
+.mode-icon { font-size: 18px; line-height: 1; }
+.mode-label { font-size: 9px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
 .np-play {
   font-size: 32px; width: 56px; height: 56px; border-radius: 50%;
   background: var(--pink); color: white;
   display: flex; align-items: center; justify-content: center; opacity: 1;
 }
 
-.np-volume { display: flex; align-items: center; gap: 8px; padding: 4px 0; flex-shrink: 0; }
-.vol-icon { font-size: 14px; }
-.volume-bar { flex: 1; -webkit-appearance: none; height: 3px; background: #333; border-radius: 2px; outline: none; }
-.volume-bar::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; border-radius: 50%; background: var(--pink); cursor: pointer; }
+.np-volume { display: flex; align-items: center; gap: 10px; padding: 6px 0; flex-shrink: 0; }
+.vol-icon { font-size: 16px; cursor: pointer; min-width: 20px; text-align: center; }
+.volume-bar { flex: 1; -webkit-appearance: none; height: 4px; background: #333; border-radius: 2px; outline: none; }
+.volume-bar::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--pink); cursor: pointer; box-shadow: 0 0 4px rgba(255, 20, 147, 0.4); }
+.vol-pct { font-size: 12px; color: var(--text-muted); min-width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
 
 .np-queue-label { text-align: center; font-size: 12px; color: var(--text-muted); padding: 8px 0 4px; cursor: pointer; flex-shrink: 0; }
 .np-queue { flex: 1; overflow-y: auto; min-height: 0; }
@@ -795,4 +997,92 @@ onMounted(() => {
 .np-queue-item:hover { background: var(--bg-card); }
 .np-queue-title { font-size: 12px; color: var(--text); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: 8px; }
 .np-queue-artist { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+
+/* Rescan button */
+.header-icon-btn {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--bg-card); border: 1px solid #333;
+  color: var(--text-muted); font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.header-icon-btn:hover { border-color: var(--pink); color: var(--pink); }
+
+/* Playlist icon & delete btn */
+.playlist-icon { background: linear-gradient(135deg, #1a1a2e, #2a1a2e); border: 1px solid #333; }
+.del-playlist-btn {
+  background: none; border: none; color: #555; font-size: 16px;
+  cursor: pointer; padding: 2px 6px; flex-shrink: 0;
+}
+.del-playlist-btn:hover { color: #e55; }
+
+/* Create Playlist button */
+.create-playlist-btn {
+  display: block; width: calc(100% - 24px); margin: 6px 12px 10px;
+  padding: 10px; background: var(--bg-card); border: 1.5px dashed #444;
+  border-radius: 10px; color: var(--pink); font-size: 14px; font-weight: 600;
+  cursor: pointer; text-align: center; transition: all 0.15s;
+}
+.create-playlist-btn:hover { border-color: var(--pink); background: rgba(255, 20, 147, 0.06); }
+
+/* Modal */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+  z-index: 200; display: flex; align-items: center; justify-content: center;
+}
+.modal {
+  background: #1c1c1c; border: 1px solid #333; border-radius: 14px;
+  padding: 20px; width: 300px; max-width: 90vw;
+}
+.modal-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 14px; }
+.modal-input {
+  width: 100%; padding: 9px 12px; background: var(--bg); border: 1px solid #444;
+  border-radius: 8px; color: var(--text); font-size: 14px; outline: none;
+}
+.modal-input:focus { border-color: var(--pink); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.modal-btn {
+  padding: 7px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
+  cursor: pointer; border: none;
+}
+.modal-btn-cancel { background: #333; color: var(--text-muted); }
+.modal-btn-cancel:hover { background: #444; }
+.modal-btn-ok { background: var(--pink); color: white; }
+.modal-btn-ok:hover { opacity: 0.9; }
+.modal-btn-ok:disabled { opacity: 0.4; cursor: not-allowed; }
+.modal-empty { color: var(--text-muted); font-size: 13px; padding: 12px 0; text-align: center; }
+.modal-playlist-item {
+  padding: 10px 12px; border-radius: 8px; cursor: pointer;
+  color: var(--text); font-size: 14px; transition: background 0.1s;
+}
+.modal-playlist-item:hover { background: var(--pink-dim); }
+
+/* Context menu */
+.context-backdrop { position: fixed; inset: 0; z-index: 149; }
+.context-menu {
+  position: fixed; z-index: 150; background: #1e1e1e; border: 1px solid #333;
+  border-radius: 10px; padding: 4px 0; min-width: 170px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.ctx-item {
+  padding: 9px 14px; font-size: 13px; color: var(--text); cursor: pointer;
+  transition: background 0.1s;
+}
+.ctx-item:hover { background: var(--bg-card); }
+.ctx-danger { color: #e55; }
+.ctx-danger:hover { background: rgba(238, 85, 85, 0.1); }
+
+/* Mini Player volume */
+.mini-volume {
+  display: flex; align-items: center; gap: 4px; margin-left: 6px; flex-shrink: 0;
+}
+.mini-vol-icon { font-size: 14px; cursor: pointer; min-width: 18px; text-align: center; }
+.mini-vol-bar {
+  width: 60px; -webkit-appearance: none; height: 3px; background: #333;
+  border-radius: 2px; outline: none; cursor: pointer;
+}
+.mini-vol-bar::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--pink); cursor: pointer;
+}
 </style>

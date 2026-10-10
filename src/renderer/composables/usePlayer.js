@@ -10,7 +10,11 @@ const progress = ref(0)
 const duration = ref(0)
 const shuffled = ref(false)
 const repeatMode = ref('off')
-const volume = ref(1)
+// Load saved volume (stored as linear 0-100)
+const savedVol = parseInt(localStorage.getItem('mp-volume') ?? '80')
+const volume = ref(Math.max(0, Math.min(100, savedVol)))
+// Apply saved volume immediately using logarithmic curve
+audio.volume = Math.pow(volume.value / 100, 2)
 const loading = ref(false)
 const scanStatus = ref('')
 
@@ -109,7 +113,9 @@ function seek(time) {
 
 function setVolume(v) {
   volume.value = v
-  audio.volume = v
+  // Logarithmic curve: squaring gives much better perceived volume control
+  audio.volume = Math.pow(v / 100, 2)
+  localStorage.setItem('mp-volume', String(Math.round(v)))
 }
 
 function shuffleQueue(keepCurrent = true) {
