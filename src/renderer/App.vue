@@ -609,43 +609,23 @@ async function loadLibrary() {
   const cached = await api.loadCachedLibrary()
   if (cached && cached.length > 0) {
     library.value = cached.sort((a, b) => a.title.localeCompare(b.title))
-    // If we have cached songs but no saved folders, extract folders from song paths
-    if (customDirs.value.length === 0) {
-      const dirs = new Set()
-      for (const s of cached) {
-        const parts = s.path.replace(/\\/g, '/').split('/')
-        // Use top-level music folder (e.g. D:/Music or C:/Users/x/Music)
-        // Find the directory 1 level above where songs are scattered
-        parts.pop() // remove filename
-        dirs.add(parts.join('\\'))
-      }
-      // Deduplicate to parent folders — keep the shortest common ancestors
-      const sorted = [...dirs].sort((a, b) => a.length - b.length)
-      const roots = []
-      for (const d of sorted) {
-        if (!roots.some(r => d.startsWith(r + '\\'))) roots.push(d)
-      }
-      customDirs.value = roots
-      await saveSettings()
-    }
     loading.value = false
     return
   }
-  // No cache — scan only saved folders (skip if none)
-  if (customDirs.value.length > 0) {
-    await rescanMusic()
-  }
+  // No cache — scan (saved folders or defaults)
+  await rescanMusic()
 }
 
 async function rescanMusic() {
-  if (customDirs.value.length === 0) return
   loading.value = true
   scanStatus.value = 'Discovering files...'
   try {
     api?.onScanProgress((data) => {
       scanStatus.value = `Reading metadata... ${data.found}/${data.total} files`
     })
-    const songs = await api.scanLibrary(customDirs.value)
+    // Pass saved folders if any, otherwise null lets main process use defaults
+    const dirs = customDirs.value.length > 0 ? customDirs.value : null
+    const songs = await api.scanLibrary(dirs)
     library.value = songs.sort((a, b) => a.title.localeCompare(b.title))
     scanStatus.value = ''
   } catch (e) {
