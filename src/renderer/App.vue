@@ -87,6 +87,7 @@
             <div class="song-title">{{ song.title }}</div>
             <div class="song-artist">{{ detailView.type === 'artist' ? song.album : song.artist }}</div>
           </div>
+          <button class="song-menu-btn" @click.stop="openSongMenu($event, song)" title="Options">⋮</button>
           <div class="song-duration">{{ formatDuration(song.duration) }}</div>
         </div>
       </template>
@@ -108,6 +109,7 @@
             <div class="song-title">{{ song.title }}</div>
             <div class="song-artist">{{ song.artist }}</div>
           </div>
+          <button class="song-menu-btn" @click.stop="openSongMenu($event, song)" title="Options">⋮</button>
           <div class="song-duration">{{ formatDuration(song.duration) }}</div>
         </div>
       </template>
@@ -978,6 +980,11 @@ onMounted(async () => {
   text-overflow: ellipsis;
 }
 .song-duration { font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
+.song-menu-btn {
+  background: none; border: none; color: #555; font-size: 18px;
+  cursor: pointer; padding: 2px 6px; flex-shrink: 0; line-height: 1;
+}
+.song-menu-btn:hover { color: var(--pink); }
 
 /* Group items */
 .group-item {
