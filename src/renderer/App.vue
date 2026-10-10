@@ -621,6 +621,8 @@ async function loadLibrary() {
   await rescanMusic()
 }
 
+let progressListenerSet = false
+
 async function rescanMusic() {
   if (customDirs.value.length === 0) {
     await addFolder()
@@ -629,14 +631,19 @@ async function rescanMusic() {
   loading.value = true
   scanStatus.value = 'Discovering files...'
   try {
-    api.onScanProgress((data) => {
-      scanStatus.value = `Reading metadata... ${data.found}/${data.total} files`
-    })
-    const songs = await api.scanLibrary(customDirs.value)
-    library.value = songs.sort((a, b) => a.title.localeCompare(b.title))
+    if (!progressListenerSet) {
+      api.onScanProgress((data) => {
+        scanStatus.value = `Reading metadata... ${data.found}/${data.total} files`
+      })
+      progressListenerSet = true
+    }
+    const dirs = [...customDirs.value]
+    const songs = await api.scanLibrary(dirs)
+    library.value = (songs || []).sort((a, b) => a.title.localeCompare(b.title))
     scanStatus.value = ''
   } catch (e) {
-    scanStatus.value = 'Scan failed'
+    console.error('Scan error:', e)
+    scanStatus.value = 'Scan failed: ' + e.message
   } finally {
     loading.value = false
   }
