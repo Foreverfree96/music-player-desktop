@@ -69,8 +69,12 @@
       <!-- Detail View -->
       <template v-else-if="detailView">
         <div class="detail-header-info">
-          <div class="detail-meta">{{ detailView.songs.length }} songs</div>
+          <div class="detail-meta">
+            {{ detailView.songs.length }} songs
+            <span v-if="selectedSongs.size > 0" class="selection-count">({{ selectedSongs.size }} selected)</span>
+          </div>
           <div class="detail-actions">
+            <button v-if="selectedSongs.size > 0" class="action-btn action-btn-outline" @click="clearSelection()">Clear</button>
             <button class="action-btn" @click="playAllDetail()">▶ Play All</button>
             <button class="action-btn action-btn-outline" @click="shuffleDetail()">⇄ Shuffle</button>
           </div>
@@ -79,8 +83,8 @@
           v-for="song in detailView.songs"
           :key="song.id"
           class="song-item"
-          :class="{ active: currentTrack && currentTrack.id === song.id }"
-          @click="playFromDetail(song)"
+          :class="{ active: currentTrack && currentTrack.id === song.id, selected: selectedSongs.has(song.id) }"
+          @click="handleSongClick($event, song, detailView.songs)"
           @contextmenu.prevent="openSongMenu($event, song)"
         >
           <div class="song-info">
@@ -97,12 +101,16 @@
         <div v-if="filteredSongs.length === 0" class="empty">
           {{ search ? 'No matches found' : 'No music found — click + to add a folder' }}
         </div>
+        <div v-if="selectedSongs.size > 0 && filteredSongs.length > 0" class="selection-bar">
+          <span>{{ selectedSongs.size }} selected</span>
+          <button class="action-btn action-btn-outline action-btn-sm" @click="clearSelection()">Clear</button>
+        </div>
         <div
           v-for="song in filteredSongs"
           :key="song.id"
           class="song-item"
-          :class="{ active: currentTrack && currentTrack.id === song.id }"
-          @click="playSong(song)"
+          :class="{ active: currentTrack && currentTrack.id === song.id, selected: selectedSongs.has(song.id) }"
+          @click="handleSongClick($event, song, filteredSongs)"
           @contextmenu.prevent="openSongMenu($event, song)"
         >
           <div class="song-info">
@@ -216,7 +224,7 @@
     <!-- Add to Playlist Modal -->
     <div v-if="showAddToPlaylist" class="modal-overlay" @click.self="showAddToPlaylist = null">
       <div class="modal">
-        <div class="modal-title">Add to Playlist</div>
+        <div class="modal-title">{{ showAddToPlaylist.length > 1 ? `Add ${showAddToPlaylist.length} songs to Playlist` : 'Add to Playlist' }}</div>
         <div v-if="playlists.length === 0" class="modal-empty">No playlists — create one first</div>
         <div
           v-for="pl in playlists"
@@ -234,8 +242,8 @@
 
     <!-- Context Menu -->
     <div v-if="contextMenu" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click.stop>
-      <div class="ctx-item" @click="contextAddToPlaylist()">Add to Playlist</div>
-      <div class="ctx-item ctx-danger" @click="contextRemoveSong()">Remove from Library</div>
+      <div class="ctx-item" @click="contextAddToPlaylist()">{{ contextMenu.songIds.length > 1 ? `Add ${contextMenu.songIds.length} songs to Playlist` : 'Add to Playlist' }}</div>
+      <div class="ctx-item ctx-danger" @click="contextRemoveSong()">{{ contextMenu.songIds.length > 1 ? `Remove ${contextMenu.songIds.length} songs from Library` : 'Remove from Library' }}</div>
     </div>
     <div v-if="contextMenu" class="context-backdrop" @click="contextMenu = null"></div>
 
@@ -396,7 +404,7 @@ import { usePlayer } from './composables/usePlayer.js'
 const {
   library, queue, currentTrack, currentIndex, isPlaying, progress, duration,
   shuffled, repeatMode, volume, loading, scanStatus,
-  playAll, playTrackFromList, togglePlayPause, next, prev,
+  playAll, playTrackFromList, togglePlayPause, next, prev, pause,
   seek, setVolume, toggleShuffle, toggleRepeat, formatTime, restoreLastTrack,
   eqBands, eqPreset, eqEnabled, EQ_PRESETS, EQ_FREQUENCIES,
   setEqBand, setEqPreset, toggleEq,
@@ -432,8 +440,12 @@ const customDirs = ref([])
 const playlists = ref([])
 const showCreatePlaylist = ref(false)
 const newPlaylistName = ref('')
-const showAddToPlaylist = ref(null) // song object or null
+const showAddToPlaylist = ref(null) // array of song IDs or null
 const playlistInput = ref(null)
+
+// Selection
+const selectedSongs = ref(new Set())
+const lastClickedId = ref(null)
 
 // Context menu
 const contextMenu = ref(null) // { x, y, song }
@@ -546,9 +558,51 @@ function formatDuration(ms) {
 }
 
 function playSong(song) { playTrackFromList(filteredSongs.value, song) }
-function openDetail(type, name, songs) { detailView.value = { type, name, songs: [...songs] }; search.value = '' }
-function closeDetail() { detailView.value = null; search.value = '' }
+function openDetail(type, name, songs) { detailView.value = { type, name, songs: [...songs] }; search.value = ''; clearSelection() }
+function closeDetail() { detailView.value = null; search.value = ''; clearSelection() }
 function playFromDetail(song) { playTrackFromList(detailView.value.songs, song) }
+
+// ─── Multi-select ───
+
+function clearSelection() {
+  selectedSongs.value = new Set()
+  lastClickedId.value = null
+}
+
+function handleSongClick(event, song, songList) {
+  if (event.ctrlKey || event.metaKey) {
+    // Ctrl+click: toggle individual selection
+    const newSet = new Set(selectedSongs.value)
+    if (newSet.has(song.id)) {
+      newSet.delete(song.id)
+    } else {
+      newSet.add(song.id)
+    }
+    selectedSongs.value = newSet
+    lastClickedId.value = song.id
+  } else if (event.shiftKey && lastClickedId.value !== null) {
+    // Shift+click: range selection
+    const lastIdx = songList.findIndex(s => s.id === lastClickedId.value)
+    const curIdx = songList.findIndex(s => s.id === song.id)
+    if (lastIdx >= 0 && curIdx >= 0) {
+      const start = Math.min(lastIdx, curIdx)
+      const end = Math.max(lastIdx, curIdx)
+      const newSet = new Set(selectedSongs.value)
+      for (let i = start; i <= end; i++) {
+        newSet.add(songList[i].id)
+      }
+      selectedSongs.value = newSet
+    }
+  } else {
+    // Plain click: clear selection and play
+    clearSelection()
+    if (detailView.value) {
+      playFromDetail(song)
+    } else {
+      playSong(song)
+    }
+  }
+}
 
 function playAllDetail() {
   if (detailView.value?.songs.length) playAll(detailView.value.songs, 0)
@@ -683,42 +737,68 @@ function openPlaylist(pl) {
 }
 
 function openSongMenu(event, song) {
-  contextMenu.value = { x: Math.min(event.clientX, window.innerWidth - 180), y: Math.min(event.clientY, window.innerHeight - 80), song }
+  // If clicked song is in selection, use all selected; otherwise just this song
+  let songs
+  if (selectedSongs.value.size > 0 && selectedSongs.value.has(song.id)) {
+    songs = [...selectedSongs.value]
+  } else {
+    songs = [song.id]
+  }
+  contextMenu.value = {
+    x: Math.min(event.clientX, window.innerWidth - 180),
+    y: Math.min(event.clientY, window.innerHeight - 80),
+    song,
+    songIds: songs,
+  }
 }
 
 function contextAddToPlaylist() {
   if (!contextMenu.value) return
-  showAddToPlaylist.value = contextMenu.value.song
+  showAddToPlaylist.value = contextMenu.value.songIds
   contextMenu.value = null
 }
 
 async function addToPlaylist(playlistId) {
-  const song = showAddToPlaylist.value
-  if (!song) return
+  const songIds = showAddToPlaylist.value
+  if (!songIds || !songIds.length) return
   const pl = playlists.value.find(p => p.id === playlistId)
-  if (pl && !pl.songIds.includes(song.id)) {
-    pl.songIds.push(song.id)
+  if (pl) {
+    for (const id of songIds) {
+      if (!pl.songIds.includes(id)) {
+        pl.songIds.push(id)
+      }
+    }
     await savePlaylists()
   }
   showAddToPlaylist.value = null
+  clearSelection()
 }
 
 async function contextRemoveSong() {
   if (!contextMenu.value) return
-  const song = contextMenu.value.song
-  removedPaths.value.add(song.path)
+  const songIds = contextMenu.value.songIds
+  const songIdSet = new Set(songIds)
+  // Find paths for these song IDs
+  const songsToRemove = library.value.filter(s => songIdSet.has(s.id))
+  for (const song of songsToRemove) {
+    removedPaths.value.add(song.path)
+  }
   localStorage.setItem('mp-removed', JSON.stringify([...removedPaths.value]))
   // Also remove from any playlist
   for (const pl of playlists.value) {
-    pl.songIds = pl.songIds.filter(id => id !== song.id)
+    pl.songIds = pl.songIds.filter(id => !songIdSet.has(id))
   }
   await savePlaylists()
   // Update detail view if open
   if (detailView.value) {
-    detailView.value.songs = detailView.value.songs.filter(s => s.id !== song.id)
+    detailView.value.songs = detailView.value.songs.filter(s => !songIdSet.has(s.id))
   }
   contextMenu.value = null
+  clearSelection()
 }
+
+// Clear selection when switching tabs
+watch(activeTab, () => clearSelection())
 
 // Auto-focus playlist name input when modal opens
 watch(showCreatePlaylist, (val) => {
@@ -971,6 +1051,21 @@ onMounted(async () => {
 .song-item:hover { background: var(--bg-card); }
 .song-item.active { background: var(--pink-dim); }
 .song-item.active .song-title { color: var(--pink); }
+.song-item.selected { background: rgba(255, 20, 147, 0.15); border-left: 3px solid var(--pink); }
+.song-item.selected.active { background: var(--pink-dim); }
+
+.selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 20px;
+  background: rgba(255, 20, 147, 0.1);
+  color: var(--pink);
+  font-size: 13px;
+  border-bottom: 1px solid rgba(255, 20, 147, 0.2);
+}
+.selection-count { color: var(--pink); font-size: 13px; margin-left: 8px; }
+.action-btn-sm { padding: 4px 10px; font-size: 12px; }
 .song-info { flex: 1; min-width: 0; margin-right: 10px; }
 .song-title {
   font-size: 14px;
