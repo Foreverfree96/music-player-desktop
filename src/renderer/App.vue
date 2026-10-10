@@ -575,7 +575,7 @@ function closeWin() { api?.windowClose() }
 // ─── Library loading ───
 
 async function saveSettings() {
-  if (api) await api.saveSettings({ folders: customDirs.value })
+  if (api) await api.saveSettings({ folders: [...customDirs.value] })
 }
 
 async function addFolder() {
@@ -650,7 +650,7 @@ async function loadPlaylists() {
 }
 
 async function savePlaylists() {
-  if (api) await api.savePlaylists(playlists.value)
+  if (api) await api.savePlaylists(JSON.parse(JSON.stringify(playlists.value)))
 }
 
 async function createPlaylist() {
