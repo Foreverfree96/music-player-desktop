@@ -14,4 +14,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   windowMinimize: () => ipcRenderer.send('window-minimize'),
   windowMaximize: () => ipcRenderer.send('window-maximize'),
   windowClose: () => ipcRenderer.send('window-close'),
+  // Sync
+  getLocalIP: () => ipcRenderer.invoke('get-local-ip'),
+  getSyncPorts: () => ipcRenderer.invoke('get-sync-ports'),
+  getConnectedDevices: () => ipcRenderer.invoke('get-connected-devices'),
+  sendSyncState: (state) => ipcRenderer.send('sync-state', state),
+  sendSyncLibrary: (library) => ipcRenderer.send('sync-library', library),
+  onSyncCommand: (cb) => ipcRenderer.on('sync-command', (_, msg) => cb(msg)),
 })

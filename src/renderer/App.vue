@@ -19,6 +19,9 @@
       <template v-else>
         <h1>My Music</h1>
         <div class="header-right">
+          <button class="header-icon-btn sync-btn" :class="{ connected: connectedDevices > 0 }" @click="showSyncInfo = !showSyncInfo" title="Phone sync">
+            📱<span v-if="connectedDevices > 0" class="sync-dot"></span>
+          </button>
           <span class="song-count">{{ visibleLibrary.length }} songs</span>
           <button class="header-icon-btn" @click="rescanMusic()" title="Rescan library">↻</button>
           <button class="folder-btn" @click="addFolder()" title="Add music folder">+</button>
@@ -46,6 +49,19 @@
           <button class="folder-chip-remove" @click="removeFolder(dir)" title="Remove folder">×</button>
         </div>
       </div>
+    </div>
+
+    <!-- Sync Info Panel -->
+    <div v-if="showSyncInfo" class="sync-panel">
+      <div class="sync-panel-title">Phone Sync</div>
+      <div class="sync-ip">
+        <span class="sync-ip-label">Connect to:</span>
+        <span class="sync-ip-value">{{ localIP }}:{{ syncPorts.ws }}</span>
+      </div>
+      <div class="sync-status">
+        {{ connectedDevices > 0 ? `${connectedDevices} device(s) connected` : 'No devices connected' }}
+      </div>
+      <div class="sync-hint">Enter this IP in the mobile app to connect</div>
     </div>
 
     <!-- Search -->
@@ -427,6 +443,7 @@
 <script setup>
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { usePlayer } from './composables/usePlayer.js'
+import { useSync } from './composables/useSync.js'
 
 const {
   library, queue, currentTrack, currentIndex, isPlaying, progress, duration,
@@ -437,7 +454,9 @@ const {
   setEqBand, setEqPreset, toggleEq,
 } = usePlayer()
 
+const { localIP, syncPorts, connectedDevices, activeDevice, init: initSync } = useSync()
 const showEq = ref(false)
+const showSyncInfo = ref(false)
 const eqPresetNames = Object.keys(EQ_PRESETS)
 
 function formatFreq(f) {
@@ -1000,6 +1019,7 @@ onMounted(async () => {
     await loadPlaylists()
     await loadLibrary()
     restoreLastTrack()
+    initSync()
   } catch (e) {
     console.error('loadLibrary error:', e)
     scanStatus.value = 'Error: ' + e.message
@@ -1624,4 +1644,24 @@ onMounted(async () => {
   -webkit-appearance: none; width: 10px; height: 10px; border-radius: 50%;
   background: var(--pink); cursor: pointer;
 }
+
+/* Sync */
+.sync-btn { position: relative; font-size: 14px; }
+.sync-btn.connected { color: var(--pink); }
+.sync-dot {
+  position: absolute; top: 2px; right: 2px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #0f0;
+}
+.sync-panel {
+  margin: 0 20px 6px; padding: 10px 14px;
+  background: var(--bg-card); border: 1px solid #333;
+  border-radius: 8px; flex-shrink: 0;
+}
+.sync-panel-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+.sync-ip { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.sync-ip-label { font-size: 12px; color: var(--text-muted); }
+.sync-ip-value { font-size: 13px; color: var(--pink); font-weight: 600; font-family: monospace; user-select: text; }
+.sync-status { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.sync-hint { font-size: 11px; color: #555; }
 </style>

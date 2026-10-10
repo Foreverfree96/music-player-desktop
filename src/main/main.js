@@ -2,8 +2,129 @@ const { app, BrowserWindow, ipcMain, dialog, protocol, globalShortcut, nativeIma
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
+const http = require('http')
+const { WebSocketServer } = require('ws')
 
 let mainWindow
+
+// ─── Sync Server (WebSocket + HTTP) ───
+const WS_PORT = 9525
+const HTTP_PORT = 9526
+let wsServer = null
+let httpServer = null
+let syncState = {} // current playback state from renderer
+let cachedLibrary = null // library data for mobile clients
+
+function getLocalIP() {
+  const interfaces = os.networkInterfaces()
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address
+    }
+  }
+  return '127.0.0.1'
+}
+
+function broadcastToClients(msg) {
+  if (!wsServer) return
+  const data = JSON.stringify(msg)
+  for (const client of wsServer.clients) {
+    if (client.readyState === 1) client.send(data)
+  }
+}
+
+function startSyncServers() {
+  // WebSocket server
+  wsServer = new WebSocketServer({ port: WS_PORT, host: '0.0.0.0' })
+  wsServer.on('connection', (ws) => {
+    console.log('[sync] Mobile client connected')
+    // Send library on connect
+    if (cachedLibrary) {
+      ws.send(JSON.stringify({ type: 'library', data: cachedLibrary }))
+    }
+    // Send current state
+    if (syncState && Object.keys(syncState).length) {
+      ws.send(JSON.stringify({ type: 'state', data: syncState }))
+    }
+    ws.on('message', (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString())
+        if (msg.type === 'command') {
+          // Forward command to renderer
+          mainWindow?.webContents.send('sync-command', msg)
+        }
+      } catch (e) { console.error('[sync] Bad message:', e.message) }
+    })
+    ws.on('close', () => console.log('[sync] Mobile client disconnected'))
+  })
+  wsServer.on('error', (e) => console.error('[sync] WS error:', e.message))
+
+  // HTTP server for audio streaming + library API
+  httpServer = http.createServer((req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Access-Control-Allow-Headers', '*')
+    if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return }
+
+    if (req.url === '/library') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(cachedLibrary || []))
+      return
+    }
+
+    if (req.url === '/state') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(syncState))
+      return
+    }
+
+    // /audio/<songId> — stream audio file
+    const audioMatch = req.url.match(/^\/audio\/(\d+)$/)
+    if (audioMatch && cachedLibrary) {
+      const songId = audioMatch[1]
+      const song = cachedLibrary.find(s => s.id === songId)
+      if (!song || !fs.existsSync(song.path)) {
+        res.writeHead(404); res.end('Not found'); return
+      }
+      const ext = path.extname(song.path).toLowerCase()
+      const mimeTypes = {
+        '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.wav': 'audio/wav',
+        '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac',
+        '.wma': 'audio/x-ms-wma', '.opus': 'audio/opus', '.wv': 'audio/x-wavpack', '.ape': 'audio/x-ape'
+      }
+      const stat = fs.statSync(song.path)
+      const range = req.headers.range
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-')
+        const start = parseInt(parts[0], 10)
+        const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': end - start + 1,
+          'Content-Type': mimeTypes[ext] || 'application/octet-stream',
+        })
+        fs.createReadStream(song.path, { start, end }).pipe(res)
+      } else {
+        res.writeHead(200, {
+          'Content-Length': stat.size,
+          'Content-Type': mimeTypes[ext] || 'application/octet-stream',
+          'Accept-Ranges': 'bytes',
+        })
+        fs.createReadStream(song.path).pipe(res)
+      }
+      return
+    }
+
+    res.writeHead(404); res.end('Not found')
+  })
+  httpServer.listen(HTTP_PORT, '0.0.0.0', () => {
+    console.log(`[sync] HTTP server on port ${HTTP_PORT}`)
+  })
+  httpServer.on('error', (e) => console.error('[sync] HTTP error:', e.message))
+
+  console.log(`[sync] WebSocket server on port ${WS_PORT}`)
+  console.log(`[sync] Local IP: ${getLocalIP()}`)
+}
 
 // Persistent data directory
 const dataDir = path.join(os.homedir(), '.music-player')
@@ -58,23 +179,64 @@ app.whenReady().then(() => {
   })
   ensureDataDir()
   createWindow()
+  startSyncServers()
 
   // Taskbar thumbnail toolbar buttons (Windows)
+  // Creates 16x16 PNG icons via data URL for reliable thumbbar rendering
   function makeIcon(shape) {
-    // 16x16 RGBA bitmap: white icon on transparent bg
-    const size = 16
-    const buf = Buffer.alloc(size * size * 4, 0)
-    const set = (x, y) => { if (x >= 0 && x < size && y >= 0 && y < size) { const i = (y * size + x) * 4; buf[i] = 255; buf[i+1] = 255; buf[i+2] = 255; buf[i+3] = 255 } }
-    if (shape === 'prev') {
-      for (let y = 3; y < 13; y++) { set(4, y); set(5, y) } // bar
-      for (let r = 0; r < 5; r++) for (let y = 8-r; y <= 8+r; y++) set(11-r, y) // triangle
-    } else if (shape === 'next') {
-      for (let y = 3; y < 13; y++) { set(11, y); set(10, y) } // bar
-      for (let r = 0; r < 5; r++) for (let y = 8-r; y <= 8+r; y++) set(5+r, y) // triangle
-    } else { // play/pause
-      for (let y = 3; y < 13; y++) { set(5, y); set(6, y); set(9, y); set(10, y) } // two bars
+    const size = 20
+    const pixels = Buffer.alloc(size * size * 4, 0) // RGBA
+    const set = (x, y) => {
+      if (x >= 0 && x < size && y >= 0 && y < size) {
+        const i = (y * size + x) * 4
+        pixels[i] = 255; pixels[i+1] = 255; pixels[i+2] = 255; pixels[i+3] = 255
+      }
     }
-    return nativeImage.createFromBuffer(buf, { width: size, height: size })
+    const fill = (x1, y1, x2, y2) => {
+      for (let y = y1; y <= y2; y++) for (let x = x1; x <= x2; x++) set(x, y)
+    }
+    if (shape === 'prev') {
+      fill(3, 4, 5, 15) // left bar
+      for (let r = 0; r < 6; r++) for (let y = 10-r; y <= 10+r; y++) set(13-r, y)
+    } else if (shape === 'next') {
+      fill(14, 4, 16, 15) // right bar
+      for (let r = 0; r < 6; r++) for (let y = 10-r; y <= 10+r; y++) set(6+r, y)
+    } else { // play/pause
+      fill(5, 4, 7, 15)  // left bar
+      fill(12, 4, 14, 15) // right bar
+    }
+    // Build a minimal PNG manually (uncompressed via zlib store)
+    const zlib = require('zlib')
+    // PNG filter: prepend 0 (none) to each row
+    const rawData = Buffer.alloc(size * (size * 4 + 1))
+    for (let y = 0; y < size; y++) {
+      rawData[y * (size * 4 + 1)] = 0 // filter byte
+      pixels.copy(rawData, y * (size * 4 + 1) + 1, y * size * 4, (y + 1) * size * 4)
+    }
+    const deflated = zlib.deflateSync(rawData)
+
+    function crc32(buf) {
+      let crc = 0xFFFFFFFF
+      for (let i = 0; i < buf.length; i++) {
+        crc ^= buf[i]
+        for (let j = 0; j < 8; j++) crc = (crc >>> 1) ^ (crc & 1 ? 0xEDB88320 : 0)
+      }
+      return (crc ^ 0xFFFFFFFF) >>> 0
+    }
+
+    function pngChunk(type, data) {
+      const len = Buffer.alloc(4); len.writeUInt32BE(data.length)
+      const typeAndData = Buffer.concat([Buffer.from(type), data])
+      const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(typeAndData))
+      return Buffer.concat([len, typeAndData, crc])
+    }
+
+    const sig = Buffer.from([137,80,78,71,13,10,26,10])
+    const ihdr = Buffer.alloc(13)
+    ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4)
+    ihdr[8] = 8; ihdr[9] = 6 // 8-bit RGBA
+    const png = Buffer.concat([sig, pngChunk('IHDR', ihdr), pngChunk('IDAT', deflated), pngChunk('IEND', Buffer.alloc(0))])
+    return nativeImage.createFromBuffer(png)
   }
 
   mainWindow.once('ready-to-show', () => {
@@ -96,6 +258,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   globalShortcut.unregisterAll()
+  if (wsServer) wsServer.close()
+  if (httpServer) httpServer.close()
   app.quit()
 })
 
@@ -106,6 +270,20 @@ ipcMain.on('window-maximize', () => {
   else mainWindow?.maximize()
 })
 ipcMain.on('window-close', () => mainWindow?.close())
+
+// ─── Sync IPC ───
+ipcMain.handle('get-local-ip', () => getLocalIP())
+ipcMain.handle('get-sync-ports', () => ({ ws: WS_PORT, http: HTTP_PORT }))
+ipcMain.handle('get-connected-devices', () => wsServer ? wsServer.clients.size : 0)
+
+ipcMain.on('sync-state', (_, state) => {
+  syncState = state
+  broadcastToClients({ type: 'state', data: state })
+})
+
+ipcMain.on('sync-library', (_, library) => {
+  cachedLibrary = library
+})
 
 // ─── Music scanning ───
 

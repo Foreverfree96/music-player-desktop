@@ -29,7 +29,8 @@
     ]
   },
   "dependencies": {
-    "music-metadata": "^10.6.5"
+    "music-metadata": "^10.6.5",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.8",
