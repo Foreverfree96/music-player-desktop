@@ -619,7 +619,10 @@ async function loadLibrary() {
 }
 
 async function rescanMusic() {
-  if (customDirs.value.length === 0) return
+  if (customDirs.value.length === 0) {
+    await addFolder()
+    return
+  }
   loading.value = true
   scanStatus.value = 'Discovering files...'
   try {
