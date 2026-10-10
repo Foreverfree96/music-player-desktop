@@ -243,6 +243,7 @@
     <!-- Context Menu -->
     <div v-if="contextMenu" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click.stop>
       <div class="ctx-item" @click="contextPlayNext()">{{ contextMenu.songIds.length > 1 ? `Play ${contextMenu.songIds.length} Next` : 'Play Next' }}</div>
+      <div v-if="contextMenu.songIds.length === 1" class="ctx-item" @click="contextGenerateSimilar()">Generate Similar</div>
       <div class="ctx-item" @click="contextAddToPlaylist()">{{ contextMenu.songIds.length > 1 ? `Add ${contextMenu.songIds.length} to Playlist` : 'Add to Playlist' }}</div>
       <div class="ctx-item ctx-danger" @click="contextRemoveSong()">{{ contextMenu.songIds.length > 1 ? `Remove ${contextMenu.songIds.length} from Library` : 'Remove from Library' }}</div>
     </div>
@@ -761,6 +762,72 @@ function contextPlayNext() {
   playNext(tracks)
   contextMenu.value = null
   clearSelection()
+}
+
+async function contextGenerateSimilar() {
+  if (!contextMenu.value) return
+  const song = contextMenu.value.song
+  contextMenu.value = null
+  clearSelection()
+
+  const srcGenre = song.genre.toLowerCase()
+  const srcArtist = song.artist.toLowerCase()
+  const srcAlbum = song.album.toLowerCase()
+  // Split genre on common delimiters for partial matching
+  const srcGenreParts = srcGenre.split(/[,;\/&]+/).map(g => g.trim()).filter(Boolean)
+
+  const scored = visibleLibrary.value
+    .filter(s => s.id !== song.id)
+    .map(s => {
+      let score = 0
+      const genre = s.genre.toLowerCase()
+      const artist = s.artist.toLowerCase()
+      const album = s.album.toLowerCase()
+
+      // Same artist — strong signal
+      if (artist === srcArtist) score += 10
+
+      // Same album — very related
+      if (album === srcAlbum && srcAlbum !== 'unknown') score += 6
+
+      // Genre matching — check full and partial
+      if (genre === srcGenre && srcGenre !== 'unknown') {
+        score += 8
+      } else if (srcGenreParts.length > 0) {
+        const genreParts = genre.split(/[,;\/&]+/).map(g => g.trim())
+        for (const gp of genreParts) {
+          if (srcGenreParts.includes(gp) && gp !== 'unknown') score += 4
+        }
+      }
+
+      // Similar duration (within 60s) — small bonus
+      if (song.duration && s.duration) {
+        const diff = Math.abs(song.duration - s.duration)
+        if (diff < 30000) score += 2
+        else if (diff < 60000) score += 1
+      }
+
+      return { song: s, score }
+    })
+    .filter(s => s.score > 0)
+    .sort((a, b) => b.score - a.score || Math.random() - 0.5)
+    .slice(0, 30)
+    .map(s => s.song)
+
+  if (scored.length === 0) {
+    // No similar songs found — just play the song itself
+    playAll([song], 0)
+    return
+  }
+
+  // Create a saved playlist
+  const name = `Similar to ${song.title}`
+  const pl = { id: Date.now().toString(), name, songIds: scored.map(s => s.id) }
+  playlists.value.push(pl)
+  await savePlaylists()
+
+  // Start playing it
+  playAll([song, ...scored], 0)
 }
 
 function contextAddToPlaylist() {
