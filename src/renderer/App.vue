@@ -613,10 +613,12 @@ async function loadLibrary() {
     loading.value = false
     return
   }
-  // No cache — only scan if user has saved folders
-  if (customDirs.value.length > 0) {
-    await rescanMusic()
+  // No cache — scan saved folders, or D:\music as default
+  if (customDirs.value.length === 0) {
+    customDirs.value = ['D:\\music']
+    await saveSettings()
   }
+  await rescanMusic()
 }
 
 async function rescanMusic() {
@@ -715,9 +717,17 @@ watch(showCreatePlaylist, (val) => {
 })
 
 onMounted(async () => {
-  if (api) {
+  if (!api) {
+    scanStatus.value = 'ERROR: electronAPI not available — preload failed to load'
+    console.error('window.electronAPI is undefined. Preload script not loaded.')
+    return
+  }
+  try {
     await loadPlaylists()
     await loadLibrary()
+  } catch (e) {
+    console.error('loadLibrary error:', e)
+    scanStatus.value = 'Error: ' + e.message
   }
 })
 </script>
