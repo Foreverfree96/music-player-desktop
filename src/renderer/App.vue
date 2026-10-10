@@ -581,11 +581,12 @@ async function saveSettings() {
 async function addFolder() {
   if (!api) return
   const folder = await api.pickFolder()
-  if (folder && !customDirs.value.includes(folder)) {
+  if (!folder) return
+  if (!customDirs.value.includes(folder)) {
     customDirs.value.push(folder)
     await saveSettings()
-    await rescanMusic()
   }
+  await rescanMusic()
 }
 
 async function removeFolder(folder) {
@@ -626,14 +627,13 @@ async function rescanMusic() {
   loading.value = true
   scanStatus.value = 'Discovering files...'
   try {
-    api?.onScanProgress((data) => {
+    api.onScanProgress((data) => {
       scanStatus.value = `Reading metadata... ${data.found}/${data.total} files`
     })
     const songs = await api.scanLibrary(customDirs.value)
     library.value = songs.sort((a, b) => a.title.localeCompare(b.title))
     scanStatus.value = ''
   } catch (e) {
-    console.error('Scan failed:', e)
     scanStatus.value = 'Scan failed'
   } finally {
     loading.value = false

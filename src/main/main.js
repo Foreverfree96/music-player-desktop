@@ -237,8 +237,11 @@ ipcMain.handle('load-cached-library', () => {
 // Full rescan
 ipcMain.handle('scan-library', async (event, customDirs) => {
   const dirs = customDirs && customDirs.length ? customDirs : getDefaultMusicDirs()
+  console.log('[scan] Scanning directories:', dirs)
   const allFiles = []
   for (const dir of dirs) walkDir(dir, allFiles)
+  console.log('[scan] Found', allFiles.length, 'audio files')
+  mainWindow?.webContents.send('scan-progress', { found: 0, total: allFiles.length })
 
   let mm
   try {
@@ -280,7 +283,7 @@ ipcMain.handle('scan-library', async (event, customDirs) => {
         duration: 0, path: filePath,
       })
     }
-    if (songs.length % 50 === 0) {
+    if (songs.length % 10 === 0) {
       mainWindow?.webContents.send('scan-progress', { found: songs.length, total: allFiles.length })
     }
   }
@@ -291,8 +294,11 @@ ipcMain.handle('scan-library', async (event, customDirs) => {
 })
 
 ipcMain.handle('pick-folder', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] })
-  if (result.canceled) return null
+  const opts = { properties: ['openDirectory'], title: 'Select Music Folder' }
+  const result = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, opts)
+    : await dialog.showOpenDialog(opts)
+  if (result.canceled || !result.filePaths.length) return null
   return result.filePaths[0]
 })
 
