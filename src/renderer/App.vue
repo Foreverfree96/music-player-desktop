@@ -773,8 +773,9 @@ async function contextGenerateSimilar() {
   const srcGenre = song.genre.toLowerCase()
   const srcArtist = song.artist.toLowerCase()
   const srcAlbum = song.album.toLowerCase()
-  // Split genre on common delimiters for partial matching
   const srcGenreParts = srcGenre.split(/[,;\/&]+/).map(g => g.trim()).filter(Boolean)
+  const MAX_PER_ARTIST = 3
+  const PLAYLIST_SIZE = 30
 
   const scored = visibleLibrary.value
     .filter(s => s.id !== song.id)
@@ -784,50 +785,65 @@ async function contextGenerateSimilar() {
       const artist = s.artist.toLowerCase()
       const album = s.album.toLowerCase()
 
-      // Same artist — strong signal
-      if (artist === srcArtist) score += 10
-
-      // Same album — very related
-      if (album === srcAlbum && srcAlbum !== 'unknown') score += 6
-
-      // Genre matching — check full and partial
+      // Genre is the primary signal for "same theme"
       if (genre === srcGenre && srcGenre !== 'unknown') {
-        score += 8
+        score += 10
       } else if (srcGenreParts.length > 0) {
         const genreParts = genre.split(/[,;\/&]+/).map(g => g.trim())
         for (const gp of genreParts) {
-          if (srcGenreParts.includes(gp) && gp !== 'unknown') score += 4
+          if (srcGenreParts.includes(gp) && gp !== 'unknown') score += 5
         }
       }
 
-      // Similar duration (within 60s) — small bonus
+      // Same artist — small bonus, not dominant
+      if (artist === srcArtist) score += 3
+
+      // Same album — small bonus
+      if (album === srcAlbum && srcAlbum !== 'unknown') score += 2
+
+      // Similar duration — tiny bonus
       if (song.duration && s.duration) {
         const diff = Math.abs(song.duration - s.duration)
-        if (diff < 30000) score += 2
-        else if (diff < 60000) score += 1
+        if (diff < 60000) score += 1
       }
 
-      return { song: s, score }
+      return { song: s, score, artist }
     })
     .filter(s => s.score > 0)
     .sort((a, b) => b.score - a.score || Math.random() - 0.5)
-    .slice(0, 30)
-    .map(s => s.song)
 
-  if (scored.length === 0) {
-    // No similar songs found — just play the song itself
+  // Pick top songs but cap per artist for variety
+  const result = []
+  const artistCount = {}
+  for (const entry of scored) {
+    const count = artistCount[entry.artist] || 0
+    if (count >= MAX_PER_ARTIST) continue
+    artistCount[entry.artist] = count + 1
+    result.push(entry.song)
+    if (result.length >= PLAYLIST_SIZE) break
+  }
+
+  // Shuffle the result so it's not grouped by score
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]]
+  }
+
+  const scored_final = result
+
+  if (scored_final.length === 0) {
     playAll([song], 0)
     return
   }
 
   // Create a saved playlist
   const name = `Similar to ${song.title}`
-  const pl = { id: Date.now().toString(), name, songIds: scored.map(s => s.id) }
+  const pl = { id: Date.now().toString(), name, songIds: scored_final.map(s => s.id) }
   playlists.value.push(pl)
   await savePlaylists()
 
   // Start playing it
-  playAll([song, ...scored], 0)
+  playAll([song, ...scored_final], 0)
 }
 
 function contextAddToPlaylist() {
