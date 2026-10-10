@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   savePlaylists: (playlists) => ipcRenderer.invoke('save-playlists', playlists),
   loadSettings: () => ipcRenderer.invoke('load-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+  onMediaKey: (cb) => ipcRenderer.on('media-key', (_, action) => cb(action)),
   windowMinimize: () => ipcRenderer.send('window-minimize'),
   windowMaximize: () => ipcRenderer.send('window-maximize'),
   windowClose: () => ipcRenderer.send('window-close'),

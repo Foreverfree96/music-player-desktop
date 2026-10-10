@@ -731,6 +731,14 @@ onMounted(async () => {
     console.error('window.electronAPI is undefined. Preload script not loaded.')
     return
   }
+  // Media key handler
+  api.onMediaKey((action) => {
+    if (action === 'play-pause') togglePlayPause()
+    else if (action === 'next') next()
+    else if (action === 'prev') prev()
+    else if (action === 'stop') pause()
+  })
+
   try {
     await loadPlaylists()
     await loadLibrary()

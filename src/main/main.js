@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, protocol } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, protocol, globalShortcut, nativeImage } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -58,9 +58,46 @@ app.whenReady().then(() => {
   })
   ensureDataDir()
   createWindow()
+
+  // Taskbar thumbnail toolbar buttons (Windows)
+  function makeIcon(shape) {
+    // 16x16 RGBA bitmap: white icon on transparent bg
+    const size = 16
+    const buf = Buffer.alloc(size * size * 4, 0)
+    const set = (x, y) => { if (x >= 0 && x < size && y >= 0 && y < size) { const i = (y * size + x) * 4; buf[i] = 255; buf[i+1] = 255; buf[i+2] = 255; buf[i+3] = 255 } }
+    if (shape === 'prev') {
+      for (let y = 3; y < 13; y++) { set(4, y); set(5, y) } // bar
+      for (let r = 0; r < 5; r++) for (let y = 8-r; y <= 8+r; y++) set(11-r, y) // triangle
+    } else if (shape === 'next') {
+      for (let y = 3; y < 13; y++) { set(11, y); set(10, y) } // bar
+      for (let r = 0; r < 5; r++) for (let y = 8-r; y <= 8+r; y++) set(5+r, y) // triangle
+    } else { // play/pause
+      for (let y = 3; y < 13; y++) { set(5, y); set(6, y); set(9, y); set(10, y) } // two bars
+    }
+    return nativeImage.createFromBuffer(buf, { width: size, height: size })
+  }
+
+  mainWindow.once('ready-to-show', () => {
+    try {
+      mainWindow.setThumbarButtonGroup([
+        { tooltip: 'Previous', click: () => mainWindow.webContents.send('media-key', 'prev'), icon: makeIcon('prev') },
+        { tooltip: 'Play/Pause', click: () => mainWindow.webContents.send('media-key', 'play-pause'), icon: makeIcon('playpause') },
+        { tooltip: 'Next', click: () => mainWindow.webContents.send('media-key', 'next'), icon: makeIcon('next') },
+      ])
+    } catch (e) { console.log('Thumbar not supported:', e.message) }
+  })
+
+  // Global media key shortcuts
+  globalShortcut.register('MediaPlayPause', () => mainWindow?.webContents.send('media-key', 'play-pause'))
+  globalShortcut.register('MediaNextTrack', () => mainWindow?.webContents.send('media-key', 'next'))
+  globalShortcut.register('MediaPreviousTrack', () => mainWindow?.webContents.send('media-key', 'prev'))
+  globalShortcut.register('MediaStop', () => mainWindow?.webContents.send('media-key', 'stop'))
 })
 
-app.on('window-all-closed', () => app.quit())
+app.on('window-all-closed', () => {
+  globalShortcut.unregisterAll()
+  app.quit()
+})
 
 // Window controls
 ipcMain.on('window-minimize', () => mainWindow?.minimize())
