@@ -120,7 +120,7 @@ function initAudioContext() {
   sourceNode = audioContext.createMediaElementSource(audio)
   gainNode = audioContext.createGain()
   normGainNode = audioContext.createGain()
-  analyserNode = audioContext.createAnalyserNode()
+  analyserNode = audioContext.createAnalyser()
   analyserNode.fftSize = 2048
 
   // Set initial volume on gain node
