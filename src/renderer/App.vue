@@ -1015,6 +1015,12 @@ onMounted(async () => {
     else if (action === 'stop') pause()
   })
 
+  // Tray song click handler
+  api.onTrayPlaySong?.((songId) => {
+    const song = library.value.find(s => s.id === songId)
+    if (song) playTrackFromList(library.value, song)
+  })
+
   try {
     await loadPlaylists()
     await loadLibrary()

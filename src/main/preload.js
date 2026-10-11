@@ -21,4 +21,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendSyncState: (state) => ipcRenderer.send('sync-state', state),
   sendSyncLibrary: (library) => ipcRenderer.send('sync-library', library),
   onSyncCommand: (cb) => ipcRenderer.on('sync-command', (_, msg) => cb(msg)),
+  onTrayPlaySong: (cb) => ipcRenderer.on('tray-play-song', (_, songId) => cb(songId)),
 })

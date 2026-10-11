@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, protocol, globalShortcut, nativeImage } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, protocol, globalShortcut, nativeImage, Tray, Menu } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -6,6 +6,8 @@ const http = require('http')
 const { WebSocketServer } = require('ws')
 
 let mainWindow
+let tray = null
+let isQuitting = false
 
 // ─── Sync Server (WebSocket + HTTP) ───
 const WS_PORT = 9525
@@ -172,6 +174,93 @@ function createWindow() {
 
 }
 
+function makeTrayIcon() {
+  const size = 16
+  const pixels = Buffer.alloc(size * size * 4, 0)
+  const set = (x, y, r, g, b) => {
+    if (x >= 0 && x < size && y >= 0 && y < size) {
+      const i = (y * size + x) * 4
+      pixels[i] = r; pixels[i+1] = g; pixels[i+2] = b; pixels[i+3] = 255
+    }
+  }
+  // Hot pink music note
+  const R = 255, G = 20, B = 147
+  // Note head (filled circle at bottom-left)
+  for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+    if (dx*dx + dy*dy <= 5) set(4+dx, 12+dy, R, G, B)
+  }
+  // Stem
+  for (let y = 3; y <= 12; y++) set(6, y, R, G, B)
+  // Flag
+  for (let y = 3; y <= 6; y++) set(7, y, R, G, B)
+  for (let y = 4; y <= 7; y++) set(8, y, R, G, B)
+  set(9, 5, R, G, B); set(9, 6, R, G, B)
+
+  const zlib = require('zlib')
+  const rawData = Buffer.alloc(size * (size * 4 + 1))
+  for (let y = 0; y < size; y++) {
+    rawData[y * (size * 4 + 1)] = 0
+    pixels.copy(rawData, y * (size * 4 + 1) + 1, y * size * 4, (y + 1) * size * 4)
+  }
+  const deflated = zlib.deflateSync(rawData)
+  function crc32(buf) {
+    let crc = 0xFFFFFFFF
+    for (let i = 0; i < buf.length; i++) {
+      crc ^= buf[i]
+      for (let j = 0; j < 8; j++) crc = (crc >>> 1) ^ (crc & 1 ? 0xEDB88320 : 0)
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0
+  }
+  function pngChunk(type, data) {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length)
+    const typeAndData = Buffer.concat([Buffer.from(type), data])
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(typeAndData))
+    return Buffer.concat([len, typeAndData, crc])
+  }
+  const sig = Buffer.from([137,80,78,71,13,10,26,10])
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4)
+  ihdr[8] = 8; ihdr[9] = 6
+  const png = Buffer.concat([sig, pngChunk('IHDR', ihdr), pngChunk('IDAT', deflated), pngChunk('IEND', Buffer.alloc(0))])
+  return nativeImage.createFromBuffer(png)
+}
+
+function rebuildTrayMenu() {
+  if (!tray) return
+  const songItems = []
+  if (cachedLibrary && cachedLibrary.length) {
+    const songs = cachedLibrary.slice(0, 200) // cap at 200 to keep menu sane
+    for (const song of songs) {
+      songItems.push({
+        label: `${song.title} — ${song.artist}`,
+        click: () => {
+          mainWindow?.webContents.send('tray-play-song', song.id)
+          mainWindow?.show()
+        }
+      })
+    }
+  }
+  const menu = Menu.buildFromTemplate([
+    { label: 'Show Player', click: () => { mainWindow?.show(); mainWindow?.focus() } },
+    { type: 'separator' },
+    { label: 'Play / Pause', click: () => mainWindow?.webContents.send('media-key', 'play-pause') },
+    { label: 'Next', click: () => mainWindow?.webContents.send('media-key', 'next') },
+    { label: 'Previous', click: () => mainWindow?.webContents.send('media-key', 'prev') },
+    { type: 'separator' },
+    ...songItems,
+    ...(songItems.length ? [{ type: 'separator' }] : []),
+    { label: 'Quit', click: () => { isQuitting = true; app.quit() } },
+  ])
+  tray.setContextMenu(menu)
+}
+
+function createTray() {
+  tray = new Tray(makeTrayIcon())
+  tray.setToolTip('My Music Player')
+  tray.on('double-click', () => { mainWindow?.show(); mainWindow?.focus() })
+  rebuildTrayMenu()
+}
+
 app.whenReady().then(() => {
   protocol.registerFileProtocol('local-audio', (request, callback) => {
     const filePath = decodeURIComponent(request.url.replace('local-audio://', ''))
@@ -179,7 +268,16 @@ app.whenReady().then(() => {
   })
   ensureDataDir()
   createWindow()
+  createTray()
   startSyncServers()
+
+  // Hide to tray on close instead of quitting
+  mainWindow.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault()
+      mainWindow.hide()
+    }
+  })
 
   // Taskbar thumbnail toolbar buttons (Windows)
   // Creates 16x16 PNG icons via data URL for reliable thumbbar rendering
@@ -256,10 +354,13 @@ app.whenReady().then(() => {
   globalShortcut.register('MediaStop', () => mainWindow?.webContents.send('media-key', 'stop'))
 })
 
+app.on('before-quit', () => { isQuitting = true })
+
 app.on('window-all-closed', () => {
   globalShortcut.unregisterAll()
   if (wsServer) wsServer.close()
   if (httpServer) httpServer.close()
+  if (tray) { tray.destroy(); tray = null }
   app.quit()
 })
 
@@ -283,6 +384,7 @@ ipcMain.on('sync-state', (_, state) => {
 
 ipcMain.on('sync-library', (_, library) => {
   cachedLibrary = library
+  rebuildTrayMenu()
 })
 
 // ─── Music scanning ───
@@ -447,7 +549,12 @@ function filterAndDedup(songs) {
 
 // Load cached library — returns null if no cache
 ipcMain.handle('load-cached-library', () => {
-  return readJSON(cacheFile, null)
+  const data = readJSON(cacheFile, null)
+  if (data && !cachedLibrary) {
+    cachedLibrary = data
+    rebuildTrayMenu()
+  }
+  return data
 })
 
 // Full rescan
