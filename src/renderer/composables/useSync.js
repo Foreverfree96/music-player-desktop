@@ -135,11 +135,15 @@ export function useSync() {
       sendState()
     })
 
-    // Poll connected device count
+    // Send state frequently for smooth progress sync
     stateInterval = setInterval(() => {
       sendState()
+    }, 500)
+
+    // Poll connected device count less often
+    setInterval(() => {
       api.getConnectedDevices().then(n => { connectedDevices.value = n })
-    }, 2000)
+    }, 3000)
   }
 
   return {
