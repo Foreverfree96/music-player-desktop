@@ -56,7 +56,7 @@
       <div class="sync-panel-title">Phone Sync</div>
       <div class="sync-ip">
         <span class="sync-ip-label">Connect to:</span>
-        <span class="sync-ip-value">{{ localIP }}:{{ syncPorts.ws }}</span>
+        <span class="sync-ip-value">{{ localIP }}</span>
       </div>
       <div class="sync-status">
         {{ connectedDevices > 0 ? `${connectedDevices} device(s) connected` : 'No devices connected' }}

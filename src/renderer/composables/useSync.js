@@ -84,6 +84,7 @@ export function useSync() {
         const plain = library.value.map(s => ({
           id: s.id, title: s.title, artist: s.artist,
           album: s.album, genre: s.genre, duration: s.duration,
+          path: s.path,
         }))
         api.sendSyncLibrary(plain)
       }
