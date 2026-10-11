@@ -116,6 +116,8 @@ export function useSync() {
           phoneIsPlaying.value = isPlaying.value
           pause()
         } else {
+          // Phone → PC: seek to where the phone was
+          if (typeof data.time === 'number') seek(data.time)
           if (phoneIsPlaying.value) play()
           phoneIsPlaying.value = false
         }
