@@ -19,12 +19,21 @@ let cachedLibrary = null // library data for mobile clients
 
 function getLocalIP() {
   const interfaces = os.networkInterfaces()
+  // Skip VPN/tunnel adapters — prefer real network interfaces
+  const skipNames = /utun|tun|tap|vpn|vEthernet|docker|wsl|vbox|vmware/i
+  let fallback = null
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) return iface.address
+      if (iface.family === 'IPv4' && !iface.internal) {
+        if (skipNames.test(name)) {
+          if (!fallback) fallback = iface.address
+        } else {
+          return iface.address
+        }
+      }
     }
   }
-  return '127.0.0.1'
+  return fallback || '127.0.0.1'
 }
 
 function broadcastToClients(msg) {
