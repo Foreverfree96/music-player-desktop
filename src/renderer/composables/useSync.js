@@ -5,6 +5,7 @@ const localIP = ref('')
 const syncPorts = ref({ ws: 9525, http: 9526 })
 const connectedDevices = ref(0)
 const activeDevice = ref('pc') // 'pc' or 'phone'
+const phoneIsPlaying = ref(false) // track play state independently for phone mode
 
 let initialized = false
 let stateInterval = null
@@ -23,10 +24,11 @@ export function useSync() {
   function sendState() {
     if (!api) return
     const track = currentTrack.value
+    const playing = activeDevice.value === 'phone' ? phoneIsPlaying.value : isPlaying.value
     api.sendSyncState({
       currentTrack: track ? { id: track.id, title: track.title, artist: track.artist, album: track.album, duration: track.duration } : null,
       currentIndex: currentIndex.value,
-      isPlaying: isPlaying.value,
+      isPlaying: playing,
       progress: progress.value,
       duration: duration.value,
       volume: volume.value,
@@ -39,30 +41,63 @@ export function useSync() {
 
   function handleCommand(msg) {
     const { action, data } = msg
+    const onPhone = activeDevice.value === 'phone'
+
     switch (action) {
-      case 'play': play(); break
-      case 'pause': pause(); break
-      case 'toggle': togglePlayPause(); break
-      case 'next': next(); break
-      case 'prev': prev(); break
-      case 'seek': seek(data.time); break
-      case 'setVolume': setVolume(data.volume); break
-      case 'toggleShuffle': toggleShuffle(); break
-      case 'toggleRepeat': toggleRepeat(); break
+      case 'play':
+        if (onPhone) { phoneIsPlaying.value = true; sendState() }
+        else play()
+        break
+      case 'pause':
+        if (onPhone) { phoneIsPlaying.value = false; sendState() }
+        else pause()
+        break
+      case 'toggle':
+        if (onPhone) { phoneIsPlaying.value = !phoneIsPlaying.value; sendState() }
+        else togglePlayPause()
+        break
+      case 'next':
+        next() // updates queue/track on desktop
+        if (onPhone) { pause(); phoneIsPlaying.value = true; sendState() }
+        break
+      case 'prev':
+        prev()
+        if (onPhone) { pause(); phoneIsPlaying.value = true; sendState() }
+        break
+      case 'seek':
+        seek(data.time)
+        break
+      case 'setVolume':
+        setVolume(data.volume)
+        break
+      case 'toggleShuffle':
+        toggleShuffle()
+        break
+      case 'toggleRepeat':
+        toggleRepeat()
+        break
       case 'playTrack': {
         const track = library.value.find(s => s.id === data.songId)
-        if (track) playTrackFromList(library.value, track)
+        if (track) {
+          playTrackFromList(library.value, track)
+          if (onPhone) { pause(); phoneIsPlaying.value = true; sendState() }
+        }
         break
       }
       case 'playAll': {
         playAll(library.value, data.startIndex || 0)
+        if (onPhone) { pause(); phoneIsPlaying.value = true; sendState() }
         break
       }
       case 'transfer': {
         activeDevice.value = data.device
         if (data.device === 'phone') {
-          // Pause PC playback — phone will start playing
-          pause()
+          phoneIsPlaying.value = isPlaying.value // carry over current play state
+          pause() // stop local playback
+        } else {
+          // Switching back to PC
+          if (phoneIsPlaying.value) play() // resume local playback
+          phoneIsPlaying.value = false
         }
         sendState()
         break
