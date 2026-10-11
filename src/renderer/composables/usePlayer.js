@@ -52,8 +52,65 @@ const eqEnabled = ref(savedEnabled)
 let audioContext = null
 let sourceNode = null
 let gainNode = null
+let normGainNode = null // Volume normalization
+let analyserNode = null
 let filterNodes = []
 let audioContextInitialized = false
+
+// ─── Volume Normalization ───
+const normEnabled = ref(localStorage.getItem('mp-norm-enabled') !== 'false')
+const TARGET_LOUDNESS = -18 // target RMS in dB
+const normCache = {} // path -> gain multiplier
+let normMeasureTimer = null
+
+function measureLoudness() {
+  if (!analyserNode || !normEnabled.value) return
+  const buf = new Float32Array(analyserNode.fftSize)
+  analyserNode.getFloatTimeDomainData(buf)
+  let sum = 0
+  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]
+  const rms = Math.sqrt(sum / buf.length)
+  const dbFS = rms > 0 ? 20 * Math.log10(rms) : -100
+  const diff = TARGET_LOUDNESS - dbFS
+  // Clamp adjustment to avoid extreme gains
+  const adjustment = Math.max(-12, Math.min(12, diff))
+  const gain = Math.pow(10, adjustment / 20)
+  normGainNode.gain.setTargetAtTime(gain, audioContext.currentTime, 0.3)
+  // Cache for this track
+  const track = currentTrack.value
+  if (track) normCache[track.path] = gain
+}
+
+function startNormMeasure() {
+  stopNormMeasure()
+  if (!normEnabled.value || !normGainNode) return
+  const track = currentTrack.value
+  if (track && normCache[track.path]) {
+    normGainNode.gain.setTargetAtTime(normCache[track.path], audioContext.currentTime, 0.1)
+    return
+  }
+  normGainNode.gain.value = 1
+  // Measure after a short delay to let audio start
+  normMeasureTimer = setTimeout(() => {
+    measureLoudness()
+    // Re-measure a couple more times for accuracy
+    normMeasureTimer = setTimeout(() => measureLoudness(), 1500)
+  }, 500)
+}
+
+function stopNormMeasure() {
+  if (normMeasureTimer) { clearTimeout(normMeasureTimer); normMeasureTimer = null }
+}
+
+function toggleNorm() {
+  normEnabled.value = !normEnabled.value
+  localStorage.setItem('mp-norm-enabled', String(normEnabled.value))
+  if (!normEnabled.value && normGainNode) {
+    normGainNode.gain.setTargetAtTime(1, audioContext.currentTime, 0.1)
+  } else if (normEnabled.value) {
+    startNormMeasure()
+  }
+}
 
 function initAudioContext() {
   if (audioContextInitialized) return
@@ -62,9 +119,13 @@ function initAudioContext() {
   audioContext = new (window.AudioContext || window.webkitAudioContext)()
   sourceNode = audioContext.createMediaElementSource(audio)
   gainNode = audioContext.createGain()
+  normGainNode = audioContext.createGain()
+  analyserNode = audioContext.createAnalyserNode()
+  analyserNode.fftSize = 2048
 
   // Set initial volume on gain node
   gainNode.gain.value = Math.pow(volume.value / 100, 2)
+  normGainNode.gain.value = 1
 
   // Create 10 biquad filters
   filterNodes = EQ_FREQUENCIES.map((freq, i) => {
@@ -76,13 +137,15 @@ function initAudioContext() {
     return filter
   })
 
-  // Connect chain: source → filters → gain → destination
-  let prev = sourceNode
+  // Connect chain: source → analyser → filters → normGain → gain → destination
+  sourceNode.connect(analyserNode)
+  let prev = analyserNode
   for (const filter of filterNodes) {
     prev.connect(filter)
     prev = filter
   }
-  prev.connect(gainNode)
+  prev.connect(normGainNode)
+  normGainNode.connect(gainNode)
   gainNode.connect(audioContext.destination)
 
   // Since we're now using gainNode for volume, set audio.volume to 1
@@ -171,6 +234,7 @@ function playCurrentTrack() {
   const url = 'file:///' + track.path.replace(/\\/g, '/')
   audio.src = url
   audio.play().catch(e => console.error('Play error:', e))
+  startNormMeasure()
 }
 
 function playAll(tracks, startIdx = 0) {
@@ -327,5 +391,7 @@ export function usePlayer() {
     // EQ
     eqBands, eqPreset, eqEnabled, EQ_PRESETS, EQ_FREQUENCIES,
     setEqBand, setEqPreset, toggleEq,
+    // Volume Normalization
+    normEnabled, toggleNorm,
   }
 }

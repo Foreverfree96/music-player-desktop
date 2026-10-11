@@ -22,4 +22,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendSyncLibrary: (library) => ipcRenderer.send('sync-library', library),
   onSyncCommand: (cb) => ipcRenderer.on('sync-command', (_, msg) => cb(msg)),
   onTrayPlaySong: (cb) => ipcRenderer.on('tray-play-song', (_, songId) => cb(songId)),
+  // Identification
+  identifyUnknownSongs: () => ipcRenderer.invoke('identify-unknown-songs'),
+  cancelIdentify: () => ipcRenderer.send('identify-cancel'),
+  onIdentifyProgress: (cb) => ipcRenderer.on('identify-progress', (_, data) => cb(data)),
 })

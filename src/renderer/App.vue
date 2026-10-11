@@ -23,6 +23,7 @@
             📱<span v-if="connectedDevices > 0" class="sync-dot"></span>
           </button>
           <span class="song-count">{{ visibleLibrary.length }} songs</span>
+          <button class="header-icon-btn" @click="startIdentify()" title="Identify unknown artists">🔍</button>
           <button class="header-icon-btn" @click="rescanMusic()" title="Rescan library">↻</button>
           <button class="folder-btn" @click="addFolder()" title="Add music folder">+</button>
         </div>
@@ -289,6 +290,23 @@
     </div>
     <div v-if="contextMenu" class="context-backdrop" @click="contextMenu = null"></div>
 
+    <!-- Identify Progress Overlay -->
+    <div v-if="identifying" class="modal-overlay">
+      <div class="modal">
+        <div class="modal-title">Identifying Songs</div>
+        <div style="text-align:center;margin:12px 0">
+          <div style="font-size:24px;font-weight:700;color:var(--pink)">{{ identifyProgress }} / {{ identifyTotal }}</div>
+          <div style="font-size:13px;color:var(--text-muted);margin:8px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ identifyCurrent }}</div>
+          <div style="height:6px;background:#333;border-radius:3px;overflow:hidden;margin:12px 0">
+            <div style="height:100%;background:var(--pink);border-radius:3px;transition:width 0.3s" :style="{ width: (identifyTotal ? (identifyProgress / identifyTotal) * 100 : 0) + '%' }"></div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="modal-btn modal-btn-cancel" @click="cancelIdentify()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Mini Player -->
     <div v-if="currentTrack" class="mini-player" @click="showNowPlaying = true">
       <div class="mini-progress" :style="{ width: progressPercent + '%' }"></div>
@@ -421,6 +439,14 @@
         </div>
       </div>
 
+      <!-- Volume Normalization -->
+      <div class="np-eq-header" style="margin-top:4px">
+        <span>Volume Normalization</span>
+        <button class="eq-toggle" :class="{ active: normEnabled }" @click="toggleNorm()">
+          {{ normEnabled ? 'ON' : 'OFF' }}
+        </button>
+      </div>
+
       <div class="np-queue-label" @click="showQueue = !showQueue">
         <span>Up Next ({{ queue.length - currentIndex - 1 }})</span>
         <span class="eq-chevron">{{ showQueue ? '▲' : '▼' }}</span>
@@ -452,6 +478,7 @@ const {
   seek, setVolume, toggleShuffle, toggleRepeat, formatTime, restoreLastTrack, playNext,
   eqBands, eqPreset, eqEnabled, EQ_PRESETS, EQ_FREQUENCIES,
   setEqBand, setEqPreset, toggleEq,
+  normEnabled, toggleNorm,
 } = usePlayer()
 
 const { localIP, syncPorts, connectedDevices, activeDevice, init: initSync } = useSync()
@@ -991,6 +1018,38 @@ async function contextRemoveSong() {
   }
   contextMenu.value = null
   clearSelection()
+}
+
+// ─── Song Identification ───
+const identifying = ref(false)
+const identifyProgress = ref(0)
+const identifyTotal = ref(0)
+const identifyCurrent = ref('')
+
+function startIdentify() {
+  if (!api || identifying.value) return
+  identifying.value = true
+  identifyProgress.value = 0
+  identifyTotal.value = 0
+  identifyCurrent.value = 'Starting...'
+
+  api.onIdentifyProgress((data) => {
+    identifyProgress.value = data.identified
+    identifyTotal.value = data.total
+    identifyCurrent.value = data.current
+    if (data.done) {
+      identifying.value = false
+      // Reload library to get updated metadata
+      loadLibrary()
+    }
+  })
+
+  api.identifyUnknownSongs()
+}
+
+function cancelIdentify() {
+  api?.cancelIdentify()
+  identifying.value = false
 }
 
 // Clear selection when switching tabs

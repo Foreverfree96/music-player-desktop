@@ -659,3 +659,89 @@ ipcMain.handle('save-settings', (event, settings) => {
   writeJSON(settingsFile, settings)
   return true
 })
+
+// ─── Song Identification (MusicBrainz) ───
+
+let identifyAbort = false
+
+ipcMain.handle('identify-unknown-songs', async () => {
+  if (!cachedLibrary) return { identified: 0, total: 0 }
+  identifyAbort = false
+
+  const NodeID3 = require('node-id3')
+  const https = require('https')
+
+  const unknowns = cachedLibrary.filter(s =>
+    !s.artist || s.artist === 'Unknown Artist' || s.artist.toLowerCase() === 'unknown'
+  )
+
+  let identified = 0
+  const total = unknowns.length
+
+  mainWindow?.webContents.send('identify-progress', { identified, total, current: '', done: false })
+
+  for (const song of unknowns) {
+    if (identifyAbort) break
+
+    mainWindow?.webContents.send('identify-progress', { identified, total, current: song.title, done: false })
+
+    try {
+      // Search MusicBrainz by title
+      const query = encodeURIComponent(song.title.replace(/[^\w\s]/g, '').trim())
+      const url = `https://musicbrainz.org/ws/2/recording?query=${query}&fmt=json&limit=3`
+
+      const data = await new Promise((resolve, reject) => {
+        https.get(url, { headers: { 'User-Agent': 'MusicPlayerDesktop/1.0 (contact@example.com)' } }, (res) => {
+          let body = ''
+          res.on('data', c => body += c)
+          res.on('end', () => {
+            try { resolve(JSON.parse(body)) } catch { reject(new Error('Parse error')) }
+          })
+        }).on('error', reject)
+      })
+
+      if (data.recordings && data.recordings.length > 0) {
+        const rec = data.recordings[0]
+        const artist = rec['artist-credit']?.[0]?.name
+        const album = rec.releases?.[0]?.title
+
+        if (artist) {
+          // Write tags to file
+          const tags = { artist }
+          if (album && (!song.album || song.album === 'Unknown Album')) {
+            tags.album = album
+          }
+
+          try {
+            const ext = path.extname(song.path).toLowerCase()
+            if (ext === '.mp3') {
+              NodeID3.update(tags, song.path)
+            }
+          } catch (e) {
+            console.error('[identify] Tag write error:', e.message)
+          }
+
+          // Update cached library
+          song.artist = artist
+          if (tags.album) song.album = album
+          identified++
+        }
+      }
+    } catch (e) {
+      console.error('[identify] Lookup error for:', song.title, e.message)
+    }
+
+    // MusicBrainz rate limit: 1 req/sec
+    await new Promise(r => setTimeout(r, 1100))
+  }
+
+  // Save updated cache
+  writeJSON(cacheFile, cachedLibrary)
+  broadcastToClients({ type: 'library', data: cachedLibrary })
+  rebuildTrayMenu()
+
+  mainWindow?.webContents.send('identify-progress', { identified, total, current: '', done: true })
+  return { identified, total }
+})
+
+ipcMain.on('identify-cancel', () => { identifyAbort = true })
